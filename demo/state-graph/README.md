@@ -4,7 +4,7 @@ A complete implementation of a ReactAgent using LangGraph's StateGraph pattern.
 
 ## 🎯 What This Demonstrates
 
-This example shows how to build a **ReAct (Reasoning + Acting) Agent** using LangGraph's StateGraph, which is the same pattern used in Scopic Agent Studio.
+This example shows how to build a **ReAct (Reasoning + Acting) Agent** using LangGraph's StateGraph, which is the same pattern used in Acme Agent Studio.
 
 ## 🏗️ Architecture
 
@@ -207,11 +207,11 @@ memory = MemorySaver()
 app = workflow.compile(checkpointer=memory)
 ```
 
-## 🔍 Comparison with Scopic Agent Studio
+## 🔍 Comparison with Acme Agent Studio
 
-This example mirrors the architecture in `scopic-agent-studio/backend/src/core/agents/react_agent/`:
+This example mirrors the architecture in `acme-agent-studio/backend/src/core/agents/react_agent/`:
 
-| **Component** | **This Example** | **Scopic Agent Studio** |
+| **Component** | **This Example** | **Acme Agent Studio** |
 |---------------|------------------|-------------------------|
 | State | `AgentState` | `ReactAgentState` |
 | Graph Builder | `create_react_agent_graph()` | `build_graph()` |
@@ -229,7 +229,7 @@ This example mirrors the architecture in `scopic-agent-studio/backend/src/core/a
 ## 📚 Learn More
 
 - [LangGraph Documentation](https://langchain-ai.github.io/langgraph/)
-- [Scopic Agent Studio Backend README](../../scopic-agent-studio/backend/src/agents/README.md)
+- [Acme Agent Studio Backend README](../../acme-agent-studio/backend/src/agents/README.md)
 - [StateGraph Tutorial](https://langchain-ai.github.io/langgraph/tutorials/introduction/)
 
 ## 🐛 Troubleshooting

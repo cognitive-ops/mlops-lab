@@ -1,5 +1,5 @@
 """
-Jinja2-based prompt manager — mirrors the pattern used in scopic-agent-studio.
+Jinja2-based prompt manager — mirrors the pattern used in acme-agent-studio.
 
 Usage:
     manager = PromptManager()

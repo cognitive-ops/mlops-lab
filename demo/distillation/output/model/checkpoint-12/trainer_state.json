@@ -1,7 +1,7 @@
 {
   "best_global_step": 12,
   "best_metric": 1.5639822483062744,
-  "best_model_checkpoint": "/mnt/d/Work/scopic/backbone-mlops/demo/distillation/output/model/checkpoint-12",
+  "best_model_checkpoint": "/mnt/d/Work/acme/backbone-mlops/demo/distillation/output/model/checkpoint-12",
   "epoch": 2.0,
   "eval_steps": 500,
   "global_step": 12,

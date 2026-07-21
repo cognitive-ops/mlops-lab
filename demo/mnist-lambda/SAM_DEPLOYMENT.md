@@ -19,7 +19,7 @@ sam --version
 ### 1. Build the SAM Application
 
 ```bash
-cd /mnt/d/work/scopic/backbone-mlops/demo/mnist-lambda
+cd /mnt/d/work/acme/backbone-mlops/demo/mnist-lambda
 
 # Build the application (packages dependencies)
 sam build

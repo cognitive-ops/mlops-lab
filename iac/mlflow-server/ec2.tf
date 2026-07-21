@@ -108,7 +108,7 @@ echo "Configuring Nginx..."
 sudo tee /etc/nginx/sites-available/mlflow <<EOL
 server {
     listen 80;
-    server_name mlflow.scopicdev.com;
+    server_name mlflow.acmedev.com;
 
     location / {
         add_header X-Frame-Options "SAMEORIGIN" always;
@@ -134,7 +134,7 @@ sleep 5
 
 # Install SSL Certificate using Certbot
 echo "Installing SSL certificate..."
-sudo certbot --nginx -d mlflow.scopicdev.com --non-interactive --agree-tos --email femi.a@scopicsoftware.com
+sudo certbot --nginx -d mlflow.acmedev.com --non-interactive --agree-tos --email admin@acmesoftware.com
 
 # Update Nginx main config for security
 sudo sed -i 's/# server_tokens off;/server_tokens off;/' /etc/nginx/nginx.conf
@@ -142,7 +142,7 @@ sudo sed -i 's/# server_tokens off;/server_tokens off;/' /etc/nginx/nginx.conf
 sudo systemctl restart nginx
 EOF
 
-  key_name = "femi-scopic-development"
+  key_name = "acme-development"
 
   depends_on = [aws_db_instance.mlflow_db]
 

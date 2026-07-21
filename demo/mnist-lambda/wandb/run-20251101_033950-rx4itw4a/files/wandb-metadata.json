@@ -2,15 +2,15 @@
   "os":  "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
   "python":  "CPython 3.11.13",
   "startedAt":  "2025-11-01T03:39:50.595528Z",
-  "program":  "/mnt/d/work/scopic/backbone-mlops/demo/mnist-lambda/train_model.py",
+  "program":  "/mnt/d/work/acme/backbone-mlops/demo/mnist-lambda/train_model.py",
   "codePath":  "demo/mnist-lambda/train_model.py",
   "codePathLocal":  "train_model.py",
   "git":  {
-    "remote":  "git@gitea-ssh.scopicsoftware.com:it-department/backbone-mlops.git",
+    "remote":  "git@gitea-ssh.acmesoftware.com:it-department/backbone-mlops.git",
     "commit":  "2b44ac6b0fe4488801fea8d9c8dbde79e9259188"
   },
   "email":  "giaosucan1983@gmail.com",
-  "root":  "/mnt/d/work/scopic/backbone-mlops/demo/mnist-lambda",
+  "root":  "/mnt/d/work/acme/backbone-mlops/demo/mnist-lambda",
   "host":  "DESKTOP-MRMBPN9",
   "executable":  "/home/giaosucan/miniconda3/envs/ai/bin/python",
   "cpu_count":  8,

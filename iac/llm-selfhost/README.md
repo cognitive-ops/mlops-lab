@@ -29,7 +29,7 @@ This Terraform configuration deploys a self-hosted LLM inference server on AWS u
 ### 1. Initialize Terraform
 
 ```bash
-cd d:\Work\scopic\ai\backbone-mlops\iac\llm-selfhost
+cd d:\Work\acme\ai\backbone-mlops\iac\llm-selfhost
 terraform init
 ```
 

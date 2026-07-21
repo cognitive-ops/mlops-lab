@@ -56,7 +56,7 @@ def lookup_knowledge_base(topic: str) -> str:
         Knowledge base entry (mock).
     """
     kb = {
-        "scopic": "Scopic Software is a global software company with 500+ engineers.",
+        "acme": "Acme Software is a global software company with 500+ engineers.",
         "mlops": "MLOps combines ML, DevOps, and data engineering for reliable ML in production.",
         "cicd": "CI/CD automates build, test, and deploy pipelines for faster delivery.",
     }

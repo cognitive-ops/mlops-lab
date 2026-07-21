@@ -59,7 +59,7 @@ def search_knowledge_base(query: str) -> str:
     kb = {
         "sglang": "SGLang is an LLM serving engine with RadixAttention for automatic KV-cache reuse across requests.",
         "langgraph": "LangGraph is a library for building stateful, multi-actor applications with LLMs using graph-based workflows.",
-        "scopic": "Scopic Software is a global software company with 500+ engineers.",
+        "acme": "Acme Software is a global software company with 500+ engineers.",
     }
     query_lower = query.lower()
     for key, value in kb.items():

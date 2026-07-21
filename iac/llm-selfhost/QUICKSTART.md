@@ -61,7 +61,7 @@ curl https://api.ipify.org
 ## Step 3: Initialize Terraform
 
 ```bash
-cd d:\Work\scopic\ai\backbone-mlops\iac\llm-selfhost
+cd d:\Work\acme\ai\backbone-mlops\iac\llm-selfhost
 terraform init
 ```
 

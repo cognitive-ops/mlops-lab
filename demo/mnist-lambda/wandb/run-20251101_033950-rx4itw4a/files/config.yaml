@@ -16,7 +16,7 @@ _wandb:
                 executable: /home/giaosucan/miniconda3/envs/ai/bin/python
                 git:
                     commit: 2b44ac6b0fe4488801fea8d9c8dbde79e9259188
-                    remote: git@gitea-ssh.scopicsoftware.com:it-department/backbone-mlops.git
+                    remote: git@gitea-ssh.acmesoftware.com:it-department/backbone-mlops.git
                 gpu: NVIDIA GeForce RTX 3050
                 gpu_count: 1
                 gpu_nvidia:
@@ -28,9 +28,9 @@ _wandb:
                 memory:
                     total: "8286072832"
                 os: Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
-                program: /mnt/d/work/scopic/backbone-mlops/demo/mnist-lambda/train_model.py
+                program: /mnt/d/work/acme/backbone-mlops/demo/mnist-lambda/train_model.py
                 python: CPython 3.11.13
-                root: /mnt/d/work/scopic/backbone-mlops/demo/mnist-lambda
+                root: /mnt/d/work/acme/backbone-mlops/demo/mnist-lambda
                 startedAt: "2025-11-01T03:39:50.595528Z"
                 writerId: mdzm3t9eittxv2mvun193wf1cdqww1fp
         m: []

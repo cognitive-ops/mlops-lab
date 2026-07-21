@@ -5,7 +5,7 @@
 Complete AWS infrastructure-as-code (IaC) solution for self-hosting Large Language Models (LLMs) using Terraform. Deploy a production-ready LLM inference server with vLLM on AWS in 15 minutes.
 
 **Created**: 2024  
-**Location**: `d:\Work\scopic\ai\backbone-mlops\iac\llm-selfhost\`  
+**Location**: `d:\Work\acme\ai\backbone-mlops\iac\llm-selfhost\`  
 **Infrastructure**: AWS EC2 + ELB + S3 + CloudWatch  
 **Framework**: vLLM (OpenAI-compatible API)  
 **Supported Models**: Mistral, Llama 2, and other open-source LLMs  
@@ -101,7 +101,7 @@ aws ec2 describe-images \
 
 ### 4. Deploy
 ```bash
-cd d:\Work\scopic\ai\backbone-mlops\iac\llm-selfhost
+cd d:\Work\acme\ai\backbone-mlops\iac\llm-selfhost
 terraform init
 terraform plan -out=tfplan
 terraform apply tfplan

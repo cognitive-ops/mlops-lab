@@ -334,7 +334,7 @@ MIT License - feel free to use for learning and commercial projects.
 
 ## 👤 Author
 
-Created by v.anh - Scopic ML Studio
+Created by v.anh - Acme ML Studio
 
 ## 🙏 Acknowledgments
 

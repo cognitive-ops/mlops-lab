@@ -65,4 +65,4 @@ Before deploying the MLFlow server, ensure the following:
 
 For further assistance, refer to the [Terraform Documentation](https://developer.hashicorp.com/terraform/docs) or the [AWS Documentation](https://aws.amazon.com/documentation/).
 
-https://kb.scopicsoftware.com/books/it-operations/page/mlops-mlflow
+https://kb.acmesoftware.com/books/it-operations/page/mlops-mlflow

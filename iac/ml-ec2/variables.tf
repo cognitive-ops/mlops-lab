@@ -34,12 +34,12 @@ variable "private_key_path" {
 variable "project" {
   description = "Project name for tagging resources"
   type        = string
-  default     = "scopic-mlops"  
+  default     = "acme-mlops"  
 }
 
 variable "owner" {
   description = "Owner name for tagging resources"
   type        = string
-  default     = "scopic"
+  default     = "acme"
 }
 

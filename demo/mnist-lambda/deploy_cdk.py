@@ -123,7 +123,7 @@ stack = MNISTLambdaStack(app, "MNISTLambdaStack")
 
 # Add tags
 cdk.Tags.of(stack).add("Owner", "v.anh")
-cdk.Tags.of(stack).add("Project", "scopic-mlstudio")
+cdk.Tags.of(stack).add("Project", "acme-mlstudio")
 cdk.Tags.of(stack).add("Application", "mnist-digit-recognition")
 
 app.synth()

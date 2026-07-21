@@ -11,7 +11,7 @@
 
 ### Terraform Setup
 - [ ] Terraform installed (v1.0+): `terraform version`
-- [ ] Terraform working directory: `d:\Work\scopic\ai\backbone-mlops\iac\llm-selfhost`
+- [ ] Terraform working directory: `d:\Work\acme\ai\backbone-mlops\iac\llm-selfhost`
 - [ ] Git initialized (optional but recommended): `git init`
 
 ### Configuration

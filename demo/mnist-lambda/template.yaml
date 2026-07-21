@@ -12,7 +12,7 @@ Globals:
         MODEL_BUCKET: !Ref MNISTModelBucket
     Tags:
       Owner: v.anh
-      Project: scopic-mlstudio
+      Project: acme-mlstudio
       Application: mnist-digit-recognition
 
 Resources:
@@ -31,7 +31,7 @@ Resources:
         - Key: Owner
           Value: v.anh
         - Key: Project
-          Value: scopic-mlstudio
+          Value: acme-mlstudio
 
   # Lambda Function for Inference
   MNISTInferenceFunction:

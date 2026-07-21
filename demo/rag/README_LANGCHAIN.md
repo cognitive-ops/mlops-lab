@@ -47,7 +47,7 @@ pip install -r requirements_langchain.txt
 ### 1. Basic Usage with Sample Data
 
 ```bash
-cd /mnt/d/work/scopic/backbone-mlops/demo/rag
+cd /mnt/d/work/acme/backbone-mlops/demo/rag
 conda activate ai
 python langchain_rag.py
 ```

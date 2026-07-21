@@ -3,7 +3,7 @@
 ## ✅ Complete Project Delivered
 
 **Status**: ✅ All files created and ready to deploy  
-**Location**: `d:\Work\scopic\ai\backbone-mlops\iac\llm-selfhost\`  
+**Location**: `d:\Work\acme\ai\backbone-mlops\iac\llm-selfhost\`  
 **Total Files**: 17 files  
 **Lines of Code**: ~3,500 lines (Terraform + configuration)  
 **Documentation**: ~15,000 lines  
