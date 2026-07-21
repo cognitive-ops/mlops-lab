@@ -1,0 +1,108 @@
+{
+  "text_classification": [
+    {
+      "text": "I absolutely love this new restaurant! The food was amazing.",
+      "predictions": [
+        {
+          "label": "positive sentiment",
+          "score": 0.9869382977485657
+        },
+        {
+          "label": "neutral",
+          "score": 0.009258302859961987
+        },
+        {
+          "label": "negative sentiment",
+          "score": 0.003803455736488104
+        }
+      ]
+    },
+    {
+      "text": "This product stopped working after one week. Very disappointed.",
+      "predictions": [
+        {
+          "label": "negative sentiment",
+          "score": 0.9696764945983887
+        },
+        {
+          "label": "neutral",
+          "score": 0.02364579401910305
+        },
+        {
+          "label": "positive sentiment",
+          "score": 0.006677620112895966
+        }
+      ]
+    },
+    {
+      "text": "The weather today is quite pleasant with some clouds.",
+      "predictions": [
+        {
+          "label": "positive sentiment",
+          "score": 0.9050418734550476
+        },
+        {
+          "label": "neutral",
+          "score": 0.0914040058851242
+        },
+        {
+          "label": "negative sentiment",
+          "score": 0.0035541222896426916
+        }
+      ]
+    },
+    {
+      "text": "I just finished reading an incredible book about artificial intelligence.",
+      "predictions": [
+        {
+          "label": "positive sentiment",
+          "score": 0.6800139546394348
+        },
+        {
+          "label": "negative sentiment",
+          "score": 0.18819789588451385
+        },
+        {
+          "label": "neutral",
+          "score": 0.13178817927837372
+        }
+      ]
+    }
+  ],
+  "intent_classification": [
+    {
+      "query": "Can you book me a flight to Paris?",
+      "intent": "booking request",
+      "confidence": 0.9344573616981506
+    },
+    {
+      "query": "What's the weather like tomorrow?",
+      "intent": "weather inquiry",
+      "confidence": 0.921252965927124
+    },
+    {
+      "query": "How do I reset my password?",
+      "intent": "technical support",
+      "confidence": 0.46946480870246887
+    },
+    {
+      "query": "Tell me a joke",
+      "intent": "entertainment",
+      "confidence": 0.8816813826560974
+    }
+  ],
+  "nli_classification": [
+    {
+      "hypothesis": "A person is in the kitchen",
+      "entailment_score": 0.9991829991340637
+    },
+    {
+      "hypothesis": "A man is cooking",
+      "entailment_score": 9.189591946778819e-05
+    },
+    {
+      "hypothesis": "Someone is cooking food",
+      "entailment_score": 0.9991100430488586
+    }
+  ]
+}

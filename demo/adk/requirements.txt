@@ -1,0 +1,8 @@
+# Google Generative AI SDK (Gemini) - New package
+google-genai>=0.2.0
+
+# HTTP requests for tool implementations
+requests>=2.31.0
+
+# Optional: For enhanced development experience
+python-dotenv>=1.0.0

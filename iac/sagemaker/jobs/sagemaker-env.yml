@@ -1,0 +1,12 @@
+name: sagemaker-runtime-env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip>=23.1 # 👈 force recent pip
+  - setuptools # 👈 avoids wheel issues
+  - wheel
+  - pip:
+      - boto3
+      - sagemaker

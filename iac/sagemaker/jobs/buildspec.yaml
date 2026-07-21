@@ -1,0 +1,32 @@
+# Build specification for AWS CodeBuild to build and push Docker image to ECR
+# The Image is customize run time environement for SageMaker training job
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.8
+    commands:      
+      - pip3 install sagemaker boto3
+ 
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME     
+  
+  build:
+    commands:
+      - echo Build started on ${date}
+      - echo Docker file scanning ... 
+      - docker login -u giaosucan -p ${DOCKERHUB_TOKEN}        
+      - docker run -i hadolint/hadolint < Dockerfile || true
+      - echo Building the Docker image ${REPOSITORY_URI}:$CODEBUILD_BUILD_NUMBER...
+      - docker build -t ${REPOSITORY_URI}:$CODEBUILD_BUILD_NUMBER . 
+  
+  post_build:
+    commands:
+      - echo Build completed on ${date}
+      - echo Pushing the Docker image...
+      - docker push ${REPOSITORY_URI}:$CODEBUILD_BUILD_NUMBER
+      - echo Push Docker image completed    

@@ -1,0 +1,17 @@
+.terraform
+
+**/*.tfstate
+**/*.tfstate.backup
+**/*.tfvars
+
+**/.terraform.lock.hcl
+
+**/.terraform/
+**/__pycache__/
+**/.dvc/
+*.zip
+**/venv/
+venv/
+
+.DS_Store
+**/.env

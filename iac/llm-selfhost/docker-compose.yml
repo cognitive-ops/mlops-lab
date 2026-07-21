@@ -1,0 +1,45 @@
+# Local vLLM deployment -- mirrors the EC2 setup in user_data.sh for
+# dev/test on a machine with an NVIDIA GPU (needs the NVIDIA Container
+# Toolkit: https://github.com/NVIDIA/nvidia-container-toolkit installed
+# and `docker info | grep nvidia` showing the runtime).
+#
+# Usage:
+#   cp .env.example .env   # fill in MODEL_REPO / HF_TOKEN as needed
+#   docker compose up -d
+#   ./test_api.local.sh    # or: curl localhost:${VLLM_PORT:-8000}/v1/models
+
+services:
+  vllm:
+    image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}
+    container_name: vllm
+    restart: unless-stopped
+    ports:
+      - "${VLLM_PORT:-8000}:8000"
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - vllm_model_cache:/root/.cache/huggingface
+    ipc: host
+    command:
+      - "--model=${MODEL_REPO:-Qwen/Qwen2.5-7B-Instruct}"
+      - "--served-model-name=${MODEL_NAME:-qwen2.5-7b-instruct}"
+      - "--max-model-len=${VLLM_MAX_MODEL_LEN:-8192}"
+      - "--gpu-memory-utilization=${VLLM_GPU_MEMORY_UTILIZATION:-0.9}"
+      - "--dtype=auto"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${VLLM_GPU_COUNT:-1}
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/models"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 300s # first boot downloads the model -- give it room
+
+volumes:
+  vllm_model_cache:

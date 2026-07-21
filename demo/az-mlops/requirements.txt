@@ -1,0 +1,6 @@
+azure-ai-ml>=1.15.0
+azure-identity
+mlflow
+scikit-learn
+pandas
+joblib

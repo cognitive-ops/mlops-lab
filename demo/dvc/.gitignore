@@ -1,0 +1,11 @@
+data/processed/y_train.pkl
+data/processed/
+data/features/X_train_features.pkl
+data/features/
+models/
+# DVC-managed outputs
+data/processed/
+data/features/
+models/
+metrics/
+plots/

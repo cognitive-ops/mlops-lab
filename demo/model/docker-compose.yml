@@ -1,0 +1,35 @@
+services:
+
+  # ── Training job (run once, then exit) ────────────────────────────────────────
+  # Usage: docker compose run --rm train
+  train:
+    build:
+      context: .
+      target: trainer
+    volumes:
+      - ./artifacts:/app/artifacts
+    environment:
+      ARTIFACTS_DIR: artifacts
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-}
+      MLFLOW_EXPERIMENT: ${MLFLOW_EXPERIMENT:-iris-classifier}
+      RUN_NAME: ${RUN_NAME:-random-forest}
+
+  # ── Inference API (stays running) ─────────────────────────────────────────────
+  # Usage: docker compose up api
+  api:
+    build:
+      context: .
+      target: server
+    ports:
+      - "${API_PORT:-8080}:8080"
+    volumes:
+      - ./artifacts:/app/artifacts
+    environment:
+      ARTIFACTS_DIR: artifacts
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped

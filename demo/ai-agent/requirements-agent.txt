@@ -1,0 +1,7 @@
+# Requirements for Simple AI Agent Demo
+
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-openai>=0.2.0
+openai>=1.0.0
+psycopg2-binary>=2.9.0

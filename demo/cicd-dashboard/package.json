@@ -1,0 +1,43 @@
+{
+  "name": "codepipeline-metrics-api",
+  "version": "1.0.0",
+  "description": "Node.js API for collecting AWS CodePipeline metrics",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "jest",
+    "lint": "eslint src --ext .ts"
+  },
+  "keywords": [
+    "aws",
+    "codepipeline",
+    "metrics",
+    "ci-cd"
+  ],
+  "author": "Scopic",
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-codepipeline": "^3.509.0",
+    "@aws-sdk/client-codebuild": "^3.509.0",
+    "@aws-sdk/client-cloudwatch": "^3.509.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.509.0",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "winston": "^3.11.0",
+    "axios": "^1.6.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.0",
+    "@types/cors": "^2.8.17",
+    "typescript": "^5.3.3",
+    "tsx": "^4.7.0",
+    "eslint": "^8.55.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.2",
+    "@typescript-eslint/parser": "^6.13.2"
+  }
+}

@@ -1,0 +1,15 @@
+# Training dependencies
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.26.0  # Updated for Python 3.12+ compatibility
+Pillow>=9.5.0
+
+# Experiment tracking
+wandb>=0.15.0
+
+# DVC pipeline
+dvc>=3.0.0
+pyyaml>=6.0
+
+# AWS deployment
+boto3>=1.26.0

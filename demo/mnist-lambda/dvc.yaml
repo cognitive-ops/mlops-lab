@@ -1,0 +1,47 @@
+stages:
+  download_data:
+    cmd: python -c "from torchvision import datasets; import torch; datasets.MNIST(root='./data', train=True, download=True); datasets.MNIST(root='./data', train=False, download=True)"
+    outs:
+      - data/MNIST/raw:
+          cache: true
+
+  train:
+    cmd: python train_model.py
+    deps:
+      - train_model.py
+      - data/MNIST/raw
+    params:
+      - training.num_epochs
+      - training.batch_size
+      - training.learning_rate
+      - training.use_wandb
+      - training.project_name
+      - model
+      - data
+    outs:
+      - models/mnist_model.pth:
+          cache: true
+      - models/mnist_model_traced.pt:
+          cache: true
+    metrics:
+      - metrics/training_metrics.json:
+          cache: false
+
+  evaluate:
+    cmd: python evaluate_model.py
+    deps:
+      - evaluate_model.py
+      - models/mnist_model.pth
+      - data/MNIST/raw
+    params:
+      - evaluation
+      - data
+    metrics:
+      - metrics/evaluation_metrics.json:
+          cache: false
+    plots:
+      - metrics/confusion_matrix.csv:
+          cache: false
+          x: predicted
+          y: actual
+          template: confusion

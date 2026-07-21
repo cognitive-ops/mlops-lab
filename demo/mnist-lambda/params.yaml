@@ -1,0 +1,37 @@
+# MNIST Training Hyperparameters
+training:
+  num_epochs: 5
+  batch_size: 64
+  learning_rate: 0.001
+  use_wandb: true
+  project_name: "mnist-digit-recognition"
+  random_seed: 42
+
+# Model Architecture
+model:
+  input_channels: 1
+  conv1_out: 32
+  conv2_out: 64
+  dropout1: 0.25
+  dropout2: 0.5
+  fc1_out: 128
+  num_classes: 10
+
+# Data
+data:
+  dataset: "MNIST"
+  data_dir: "./data"
+  num_workers: 2
+  normalize_mean: 0.1307
+  normalize_std: 0.3081
+
+# Evaluation
+evaluation:
+  test_batch_size: 1000
+  save_predictions: false
+
+# Lambda Deployment
+lambda:
+  memory_size: 512
+  timeout: 30
+  runtime: "python3.11"

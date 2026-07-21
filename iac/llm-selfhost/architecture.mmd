@@ -1,0 +1,88 @@
+graph TB
+    subgraph Internet["☁️ Internet"]
+        User["👤 Users / API Clients<br/>(Python, Node.js, cURL)"]
+    end
+
+    subgraph AWS["AWS Cloud (us-east-1)"]
+        subgraph VPC["VPC (10.0.0.0/16)"]
+            subgraph PubSubnet["Public Subnet (10.0.1.0/24)"]
+                IGW["🌐 Internet Gateway"]
+                EIP["📌 Elastic IP"]
+
+                subgraph ALBBlock["Application Load Balancer"]
+                    ALB["⚖️ ALB<br/>HTTP :80 / HTTPS :443"]
+                    TG["🎯 Target Group<br/>Port 8000<br/>Health Check: /v1/models"]
+                end
+
+                subgraph EC2Block["EC2 GPU Instance (g4dn.xlarge)"]
+                    direction TB
+                    GPU["🖥️ NVIDIA T4 GPU (16GB VRAM)"]
+                    VLLM["⚡ vLLM Server<br/>OpenAI-Compatible API<br/>Port 8000"]
+                    OS["🐧 Ubuntu 22.04 LTS<br/>NVIDIA Driver 535 + CUDA"]
+                    SYS["⚙️ Systemd Service<br/>Auto-restart on failure"]
+                end
+
+                subgraph Storage["Storage"]
+                    ROOT["💾 Root EBS (100GB gp3)<br/>OS + Software"]
+                    MODEL["💾 Model EBS (200GB gp3)<br/>/mnt/models"]
+                end
+            end
+        end
+
+        subgraph SecurityBlock["Security & IAM"]
+            SG_EC2["🔒 EC2 Security Group<br/>SSH :22, vLLM :8000"]
+            SG_ALB["🔒 ALB Security Group<br/>HTTP :80, HTTPS :443"]
+            IAM["🔑 IAM Role + Instance Profile<br/>S3, CloudWatch, SSM, Secrets"]
+        end
+
+        subgraph ServicesBlock["AWS Services"]
+            S3["🪣 S3 Bucket<br/>Model Artifacts & Logs<br/>Encrypted + Versioned"]
+            CW["📊 CloudWatch<br/>Logs, Metrics, Alarms"]
+            DASH["📈 CloudWatch Dashboard<br/>CPU, Network, Errors"]
+            SSM["🔧 Systems Manager<br/>Secure Session Access"]
+            SM["🔐 Secrets Manager<br/>HuggingFace Tokens"]
+        end
+    end
+
+    subgraph Models["🤖 Model Sources"]
+        HF["🤗 HuggingFace Hub<br/>Mistral-7B, Llama 2, etc."]
+    end
+
+    User -->|"HTTP/HTTPS Requests"| IGW
+    IGW --> ALB
+    ALB --> TG
+    TG -->|":8000"| VLLM
+    VLLM --> GPU
+    VLLM --> MODEL
+    GPU -.->|"Inference"| VLLM
+    OS --> GPU
+    SYS --> VLLM
+    EC2Block --> ROOT
+    EC2Block --> MODEL
+    EIP -.->|"Static IP"| EC2Block
+    SG_ALB -.->|"Controls"| ALB
+    SG_EC2 -.->|"Controls"| EC2Block
+    IAM -.->|"Permissions"| EC2Block
+    EC2Block -->|"Logs & Metrics"| CW
+    CW --> DASH
+    EC2Block -->|"Artifacts"| S3
+    HF -->|"Download Model"| MODEL
+    EC2Block -.-> SSM
+    EC2Block -.-> SM
+
+    classDef aws fill:#FF9900,stroke:#232F3E,color:#232F3E,stroke-width:2px
+    classDef compute fill:#ED7100,stroke:#232F3E,color:white,stroke-width:2px
+    classDef storage fill:#3B48CC,stroke:#232F3E,color:white,stroke-width:2px
+    classDef security fill:#DD344C,stroke:#232F3E,color:white,stroke-width:2px
+    classDef network fill:#8C4FFF,stroke:#232F3E,color:white,stroke-width:2px
+    classDef monitoring fill:#E7157B,stroke:#232F3E,color:white,stroke-width:2px
+    classDef user fill:#147EBA,stroke:#232F3E,color:white,stroke-width:2px
+    classDef model fill:#1A8038,stroke:#232F3E,color:white,stroke-width:2px
+
+    class User user
+    class ALB,TG,IGW,EIP network
+    class GPU,VLLM,OS,SYS compute
+    class ROOT,MODEL,S3 storage
+    class SG_EC2,SG_ALB,IAM,SM security
+    class CW,DASH,SSM monitoring
+    class HF model

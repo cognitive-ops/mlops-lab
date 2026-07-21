@@ -1,0 +1,13 @@
+# Serving
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+
+# Model
+scikit-learn>=1.5
+joblib>=1.4
+numpy>=1.26
+
+# Training (optional — can be omitted in a serve-only image)
+mlflow>=2.15
+python-dotenv>=1.0

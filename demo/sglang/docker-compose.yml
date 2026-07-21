@@ -1,0 +1,38 @@
+services:
+
+  # ── SGLang inference server (OpenAI-compatible API) ───────────────────────────
+  # Usage: docker compose up sglang
+  sglang:
+    image: lmsysorg/sglang:latest
+    container_name: sglang-server
+    ports:
+      - "${SGLANG_PORT:-30000}:30000"
+    volumes:
+      - ${HF_CACHE_DIR:-./.cache/huggingface}:/root/.cache/huggingface
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    shm_size: "16g"
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: >
+      python3 -m sglang.launch_server
+      --model-path ${MODEL_REPO:-meta-llama/Llama-3.1-8B-Instruct}
+      --host 0.0.0.0
+      --port 30000
+      --context-length ${MAX_MODEL_LEN:-8192}
+      --tool-call-parser ${TOOL_CALL_PARSER:-llama3}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:30000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+    restart: unless-stopped

@@ -1,0 +1,42 @@
+{
+  "image_attributes": [
+    {
+      "attribute": "a dark cloudy day",
+      "probability": 0.25044137239456177
+    },
+    {
+      "attribute": "high quality photo",
+      "probability": 0.2217915952205658
+    },
+    {
+      "attribute": "low quality photo",
+      "probability": 0.15077432990074158
+    },
+    {
+      "attribute": "a chaotic scene",
+      "probability": 0.11067725718021393
+    },
+    {
+      "attribute": "an urban landscape",
+      "probability": 0.09806527942419052
+    },
+    {
+      "attribute": "a peaceful scene",
+      "probability": 0.08798615634441376
+    },
+    {
+      "attribute": "a bright sunny day",
+      "probability": 0.048512041568756104
+    },
+    {
+      "attribute": "a rural landscape",
+      "probability": 0.03175198659300804
+    }
+  ],
+  "object_detection": [
+    {
+      "object": "water",
+      "confidence": 0.36475667357444763
+    }
+  ]
+}

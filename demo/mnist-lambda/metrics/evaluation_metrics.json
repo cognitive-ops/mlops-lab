@@ -1,0 +1,17 @@
+{
+  "test_accuracy": 99.22,
+  "test_loss": 0.02610004743328318,
+  "average_confidence": 0.993833601474762,
+  "total_samples": 10000,
+  "correct_predictions": 9922,
+  "class_0_accuracy": 0.9959183673469387,
+  "class_1_accuracy": 1.0,
+  "class_2_accuracy": 0.9961240310077519,
+  "class_3_accuracy": 0.996039603960396,
+  "class_4_accuracy": 0.9989816700610998,
+  "class_5_accuracy": 0.992152466367713,
+  "class_6_accuracy": 0.9874739039665971,
+  "class_7_accuracy": 0.9892996108949417,
+  "class_8_accuracy": 0.9856262833675564,
+  "class_9_accuracy": 0.979187314172448
+}

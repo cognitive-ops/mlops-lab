@@ -1,0 +1,12 @@
+You are processing a batch of {{ texts | length }} {{ language }} texts for sentiment analysis.
+{% if domain %}Domain context: {{ domain }}.{% endif %}
+
+For each text, respond with a JSON array where each element has:
+  - "index": the 0-based position
+  - "label": NEG, NEU, or POS
+  - "confidence": float 0.0–1.0
+
+Texts to analyze:
+{% for text in texts %}
+[{{ loop.index0 }}] {{ text }}
+{% endfor %}

@@ -1,0 +1,102 @@
+schema: '2.0'
+stages:
+  download_data:
+    cmd: python -c "from torchvision import datasets; import torch; 
+      datasets.MNIST(root='./data', train=True, download=True); 
+      datasets.MNIST(root='./data', train=False, download=True)"
+    outs:
+    - path: data/MNIST/raw
+      hash: md5
+      md5: 8c257df187855c681f88bde92d721ccd.dir
+      size: 66544770
+      nfiles: 8
+  train:
+    cmd: python train_model.py
+    deps:
+    - path: data/MNIST/raw
+      hash: md5
+      md5: 8c257df187855c681f88bde92d721ccd.dir
+      size: 66544770
+      nfiles: 8
+    - path: train_model.py
+      hash: md5
+      md5: e00c48cd222004e3f24c0caf643caf1f
+      size: 8623
+      isexec: true
+    params:
+      params.yaml:
+        data:
+          dataset: MNIST
+          data_dir: ./data
+          num_workers: 2
+          normalize_mean: 0.1307
+          normalize_std: 0.3081
+        model:
+          input_channels: 1
+          conv1_out: 32
+          conv2_out: 64
+          dropout1: 0.25
+          dropout2: 0.5
+          fc1_out: 128
+          num_classes: 10
+        training.batch_size: 64
+        training.learning_rate: 0.001
+        training.num_epochs: 5
+        training.project_name: mnist-digit-recognition
+        training.use_wandb: true
+    outs:
+    - path: metrics/training_metrics.json
+      hash: md5
+      md5: ea33774238ba6be2f03e572f04e4eea2
+      size: 155
+      isexec: true
+    - path: models/mnist_model.pth
+      hash: md5
+      md5: 9f24aa317b71335e0be3859556f9a1bc
+      size: 1690309
+      isexec: true
+    - path: models/mnist_model_traced.pt
+      hash: md5
+      md5: dd4c82bf9cd282f80e4afb72e3e52fe7
+      size: 1703300
+      isexec: true
+  evaluate:
+    cmd: python evaluate_model.py
+    deps:
+    - path: data/MNIST/raw
+      hash: md5
+      md5: 8c257df187855c681f88bde92d721ccd.dir
+      size: 66544770
+      nfiles: 8
+    - path: evaluate_model.py
+      hash: md5
+      md5: 5ca6e216004acba79958e8d89f06203e
+      size: 5503
+      isexec: true
+    - path: models/mnist_model.pth
+      hash: md5
+      md5: 9f24aa317b71335e0be3859556f9a1bc
+      size: 1690309
+      isexec: true
+    params:
+      params.yaml:
+        data:
+          dataset: MNIST
+          data_dir: ./data
+          num_workers: 2
+          normalize_mean: 0.1307
+          normalize_std: 0.3081
+        evaluation:
+          test_batch_size: 1000
+          save_predictions: false
+    outs:
+    - path: metrics/confusion_matrix.csv
+      hash: md5
+      md5: 3c982a5ab9de1e59832e45f494a07f0b
+      size: 329
+      isexec: true
+    - path: metrics/evaluation_metrics.json
+      hash: md5
+      md5: c0f2eb846b081f47e59ce0648098fb0d
+      size: 566
+      isexec: true

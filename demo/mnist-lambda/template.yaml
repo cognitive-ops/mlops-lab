@@ -1,0 +1,165 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: MNIST Handwriting Detection - Serverless API
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: python3.11
+    Environment:
+      Variables:
+        MODEL_BUCKET: !Ref MNISTModelBucket
+    Tags:
+      Owner: v.anh
+      Project: scopic-mlstudio
+      Application: mnist-digit-recognition
+
+Resources:
+  # S3 Bucket for Model Storage
+  MNISTModelBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-models-${AWS::AccountId}
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Owner
+          Value: v.anh
+        - Key: Project
+          Value: scopic-mlstudio
+
+  # Lambda Function for Inference
+  MNISTInferenceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-inference
+      CodeUri: ./
+      Handler: lambda_function.lambda_handler
+      Description: MNIST digit recognition inference
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref MNISTModelBucket
+      Events:
+        PredictApi:
+          Type: Api
+          Properties:
+            Path: /predict
+            Method: POST
+            RestApiId: !Ref MNISTApi
+      Environment:
+        Variables:
+          MODEL_BUCKET: !Ref MNISTModelBucket
+
+  # API Gateway
+  MNISTApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: MNIST-Digit-Recognition-API
+      StageName: prod
+      Description: API for handwritten digit recognition using deep learning
+      Cors:
+        AllowOrigin: "'*'"
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+      DefinitionBody:
+        openapi: 3.0.1
+        info:
+          title: MNIST Digit Recognition API
+          version: '1.0'
+        paths:
+          /predict:
+            post:
+              summary: Predict handwritten digit
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      required:
+                        - image
+                      properties:
+                        image:
+                          type: string
+                          description: Base64 encoded image
+                        return_probabilities:
+                          type: boolean
+                          description: Return probability distribution
+              responses:
+                '200':
+                  description: Successful prediction
+                  content:
+                    application/json:
+                      schema:
+                        type: object
+                        properties:
+                          predicted_digit:
+                            type: integer
+                          confidence:
+                            type: number
+                          probabilities:
+                            type: array
+                            items:
+                              type: number
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                httpMethod: POST
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MNISTInferenceFunction.Arn}/invocations
+          /health:
+            get:
+              summary: Health check endpoint
+              responses:
+                '200':
+                  description: Service is healthy
+                  content:
+                    application/json:
+                      schema:
+                        type: object
+                        properties:
+                          status:
+                            type: string
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: '{"statusCode": 200}'
+                responses:
+                  default:
+                    statusCode: 200
+                    responseTemplates:
+                      application/json: '{"status": "healthy"}'
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${MNISTApi}.execute-api.${AWS::Region}.amazonaws.com/prod/
+    Export:
+      Name: !Sub ${AWS::StackName}-ApiEndpoint
+
+  PredictEndpoint:
+    Description: Prediction endpoint URL
+    Value: !Sub https://${MNISTApi}.execute-api.${AWS::Region}.amazonaws.com/prod/predict
+    Export:
+      Name: !Sub ${AWS::StackName}-PredictEndpoint
+
+  HealthEndpoint:
+    Description: Health check endpoint URL
+    Value: !Sub https://${MNISTApi}.execute-api.${AWS::Region}.amazonaws.com/prod/health
+    Export:
+      Name: !Sub ${AWS::StackName}-HealthEndpoint
+
+  MNISTFunctionArn:
+    Description: MNIST Lambda Function ARN
+    Value: !GetAtt MNISTInferenceFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-FunctionArn
+
+  ModelBucketName:
+    Description: S3 Bucket for model storage
+    Value: !Ref MNISTModelBucket
+    Export:
+      Name: !Sub ${AWS::StackName}-ModelBucket
