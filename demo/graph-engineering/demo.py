@@ -1,9 +1,10 @@
 """
 Scripted demo: ingest a small multi-source corpus (each source handled by
 one call to the extractor agent), then run multi-hop questions against the
-merged knowledge graph, and save a visualization.
+merged knowledge graph in Neo4j.
 
 Usage:
+    docker-compose up -d
     export OPENAI_API_KEY="sk-..."
     python demo.py
 """
@@ -44,8 +45,10 @@ def run() -> None:
         print(f"A: {result['final_answer']}")
         print(f"   retrieved: {result['retrieved_triples']}")
 
-    kg.draw("knowledge_graph.png")
-    print("\nSaved graph visualization -> knowledge_graph.png")
+    print("\nView the graph: open http://localhost:7474 (Neo4j Browser) and run:")
+    print("  MATCH (n)-[r]->(m) RETURN n, r, m")
+
+    kg.close()
 
 
 if __name__ == "__main__":

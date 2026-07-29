@@ -20,7 +20,7 @@ one agent *builds* the graph and another *reasons* over it (Graph-RAG).
            │                    └──────┬───────┘
            ▼                           ▼
       ┌─────────────────────────────────────┐
-      │   Shared Knowledge Graph (networkx)  │
+      │   Shared Knowledge Graph (Neo4j)     │
       └─────────────────────────────────────┘
 ```
 
@@ -29,53 +29,61 @@ one agent *builds* the graph and another *reasons* over it (Graph-RAG).
 **Extractor** – LLM extracts `(subject, relation, object)` triples from raw
 text and writes them into the shared graph.
 **Query Agent** – LLM identifies which known entities a question touches,
-pulls the bounded subgraph around them (`k`-hop BFS), and answers grounded
-*only* in those facts — the retrieved triples are printed alongside the
-answer so the reasoning path is inspectable, unlike vector-RAG's opaque
-similarity match.
-**Knowledge Graph** (`kg.py`) – in-memory `networkx.MultiDiGraph` singleton,
-shared by every node in the process. No external DB required for the demo;
-swap in Neo4j/Memgraph by reimplementing `KnowledgeGraph` behind the same
-interface if you need persistence or multi-process sharing.
+pulls the bounded subgraph around them (`k`-hop Cypher traversal), and
+answers grounded *only* in those facts — the retrieved triples are printed
+alongside the answer so the reasoning path is inspectable, unlike
+vector-RAG's opaque similarity match.
+**Knowledge Graph** (`kg.py`) – `KnowledgeGraph` wrapper over the Neo4j Python
+driver. Entities are `(:Entity {name})` nodes with a uniqueness constraint;
+relations become Cypher relationship types (sanitized from the LLM's free-text
+relation label to prevent Cypher injection, original text kept as `r.label`).
 
 ## Quick Start
 
 ```bash
-# 1. Install dependencies
+# 1. Start Neo4j (browser at http://localhost:7474, default login neo4j/password)
+docker-compose up -d
+
+# 2. Install dependencies
 pip install -r requirements.txt
 
-# 2. Set your OpenAI key
+# 3. Set your OpenAI key (and Neo4j creds if you changed them)
 export OPENAI_API_KEY="sk-..."
+# export NEO4J_URI="bolt://localhost:7687"
+# export NEO4J_USER="neo4j"
+# export NEO4J_PASSWORD="password"
 
-# 3. Run the small example
+# 4. Run the small example
 python main.py
 
-# 4. Run the full scripted demo (multi-source ingest + multi-hop questions + graph image)
+# 5. Run the full scripted demo (multi-source ingest + multi-hop questions)
 python demo.py
 ```
 
 `demo.py` ingests five sentences from different "sources," then asks
 questions that require hopping across more than one edge to answer
 (e.g. *"Who leads the company that owns GitHub?"* requires
-`GitHub —acquired_by→ Microsoft —ceo→ Satya Nadella`). It also saves
-`knowledge_graph.png` showing the graph built during the run.
+`GitHub —acquired_by→ Microsoft —ceo→ Satya Nadella`). Open
+http://localhost:7474 and run `MATCH (n)-[r]->(m) RETURN n, r, m` to see the
+graph built during the run.
 
 ## Files
 
 | File | Description |
 |---|---|
-| `kg.py` | `KnowledgeGraph` wrapper around `networkx` — add triples, bounded-hop subgraph retrieval, shortest path, drawing |
+| `kg.py` | `KnowledgeGraph` wrapper over the Neo4j driver — add triples, bounded-hop subgraph retrieval, shortest path |
+| `docker-compose.yml` | Local Neo4j instance for the demo |
 | `state.py` | Shared `GraphState` TypedDict used by every node |
 | `agents/extractor.py` | Extractor worker: text → triples → writes to KG |
 | `agents/query_agent.py` | Query worker: question → entity match → subgraph retrieval → grounded answer |
 | `supervisor.py` | Routes ingest vs. query |
 | `graph.py` | LangGraph `StateGraph` wiring (the *orchestration* graph, distinct from the knowledge graph) |
 | `main.py` | Minimal entry point |
-| `demo.py` | Scripted multi-source ingest + multi-hop Q&A + visualization |
+| `demo.py` | Scripted multi-source ingest + multi-hop Q&A |
 
 ## Customisation
 
-- **Swap the store**: reimplement `KnowledgeGraph` in `kg.py` against Neo4j/Memgraph for persistence across runs or multiple processes.
 - **Add an agent**: e.g. a "curator" node that dedupes/merges near-duplicate entities before they're written to the graph.
-- **Tune retrieval**: `hops` in `kg.subgraph_for()` controls how far the query agent looks from the seed entities — raise it for more context, lower it to reduce noise/token cost.
+- **Tune retrieval**: `hops` in `kg.subgraph_for()` controls how far the query agent looks from the seed entities (variable-length Cypher path) — raise it for more context, lower it to reduce noise/token cost.
 - **Change the LLM**: edit the model name in `agents/extractor.py` / `agents/query_agent.py`.
+- **Remote/managed Neo4j**: point `NEO4J_URI`/`NEO4J_USER`/`NEO4J_PASSWORD` at AuraDB or any Neo4j instance instead of the local container.

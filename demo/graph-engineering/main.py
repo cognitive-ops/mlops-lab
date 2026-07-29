@@ -2,6 +2,7 @@
 Entry point — ingest a couple of sentences, then ask a question about them.
 
 Usage:
+    docker-compose up -d
     export OPENAI_API_KEY="sk-..."
     python main.py
 """
@@ -32,3 +33,5 @@ if __name__ == "__main__":
     print(f"\nKnowledge graph: {kg.stats()}\n")
 
     ask("Who leads the company that owns GitHub?")
+
+    kg.close()
