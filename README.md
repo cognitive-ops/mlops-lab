@@ -27,6 +27,7 @@ iac/     Terraform stacks for MLOps infra
 | `dspy` | DSPy RAG pipelines (simple/optimized/production/with-retriever) |
 | `dvc` | DVC (Data Version Control) demo |
 | `graph-engineering` | Multi-agent Graph-RAG: extractor agent builds a knowledge graph (Neo4j), query agent answers via bounded subgraph retrieval |
+| `insurance` | Multi-agent LangGraph auto insurance intake pipeline (extract → validate → risk-screen → finalize) |
 | `langgraph-sglang-agent` | LangGraph agent backed by a self-hosted SGLang model |
 | `mnist-lambda` | MNIST model trained + deployed to AWS Lambda (SAM/CDK, DVC-tracked) |
 | `modal` | Modal.com serverless compute demo |
