@@ -2,7 +2,7 @@
 Insurance Intake Agent – entry point.
 
 Run:
-    export OPENAI_API_KEY="sk-..."
+    cp .env.example .env   # fill in OPENAI_API_KEY
     python main.py                 # scripted scenarios (no TTY needed)
     python main.py --interactive   # chat with the agent in your terminal
 """
@@ -10,9 +10,12 @@ Run:
 import os
 import sys
 
+from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 
 from graph import compile_graph
+
+load_dotenv()
 
 
 def initial_state(message: str) -> dict:
