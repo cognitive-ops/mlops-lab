@@ -1,21 +1,21 @@
 """
-Validator agent – checks the merged claim data against the required field
-list and per-field format rules. Deterministic guardrail: completeness and
-format checks have no ambiguity, so a rule engine is the reliable choice.
+Validate stage B – runs once the policy is verified. Checks the full loss-
+detail fields are present and well-formed. Deterministic for the same
+reason as stage A: completeness/format checks have no ambiguity.
 """
 
-from fnol_schema import REQUIRED_FIELDS, VALID_LOSS_TYPES
+from fnol_schema import STAGE_B_FIELDS, VALID_LOSS_TYPES
 from fnol_state import FNOLState
 from fnol_tools import parse_date
 
 
-def validator_node(state: FNOLState) -> dict:
-    """LangGraph node: find missing or invalid required fields."""
+def validate_stage_b_node(state: FNOLState) -> dict:
+    """LangGraph node: check loss-detail fields are present and well-formed."""
 
     claim_data = state.get("claim_data", {})
     missing = []
 
-    for field in REQUIRED_FIELDS:
+    for field in STAGE_B_FIELDS:
         value = claim_data.get(field)
         # injuries_reported is a bool — False is a valid answer, only None/absent is missing
         if field == "injuries_reported":
@@ -34,9 +34,9 @@ def validator_node(state: FNOLState) -> dict:
 
     missing = list(dict.fromkeys(missing))
 
-    print(f"✅ Validator → missing/invalid: {missing or '(none — complete)'}")
+    print(f"✅ Validate (stage B) → missing/invalid: {missing or '(none — complete)'}")
 
     return {
         "missing_fields": missing,
-        "validated": True,
+        "validated_stage_b": True,
     }

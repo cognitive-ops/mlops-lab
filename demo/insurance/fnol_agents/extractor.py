@@ -45,6 +45,7 @@ def extractor_node(state: FNOLState) -> dict:
 
     return {
         "claim_data": claim_data,
-        "validated": False,
-        "pending_user_reply": False,
+        "validated_stage_a": False,
+        "validated_stage_b": False,
+        "ingested": False,
     }

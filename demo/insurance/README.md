@@ -3,7 +3,7 @@
 Two independent multi-agent intake pipelines, both built with LangGraph:
 
 - **Policy application intake** (below) — `main.py` / `state.py` / `schema.py` / `tools.py` / `supervisor.py` / `graph.py` / `agents/`
-- **[FNOL claims intake](#fnol-first-notice-of-loss-claims-intake)** — `fnol_main.py` / `fnol_state.py` / `fnol_schema.py` / `fnol_tools.py` / `fnol_supervisor.py` / `fnol_graph.py` / `fnol_agents/`
+- **[FNOL claims intake](#fnol-first-notice-of-loss-claims-intake)** — `fnol_main.py` / `fnol_state.py` / `fnol_schema.py` / `fnol_tools.py` / `fnol_guardrails.py` / `fnol_supervisor.py` / `fnol_graph.py` / `fnol_agents/`
 
 They share a folder but no code — separate module names throughout so
 neither pipeline can clobber the other.
@@ -113,98 +113,86 @@ python main.py --interactive
 
 ## FNOL (First Notice of Loss) Claims Intake
 
-A **production-shaped** multi-agent claims intake pipeline: a cyclic
-LangGraph state machine with deterministic guardrails at every stage and a
-mandatory Human-in-the-Loop (HITL) checkpoint before any claim is assigned
-to an adjuster or denied — there is no auto-approval path.
+A **production-shaped** multi-agent claims intake pipeline modeled on a
+target enterprise architecture: multi-modal ingestion, a deterministic
+guardrail rail in front of the LLM engine, a cyclic LangGraph state machine
+with a Guidewire-style policy verification step, and risk-based conditional
+routing — auto-approve only for genuinely low-risk claims, everything else
+goes to a human, with Special Investigations Unit (SIU) escalation for the
+highest-risk cases.
 
-### Architecture
+### Target architecture
 
-```mermaid
-flowchart TD
-    START([START]) --> supervisor{Supervisor}
+This is the architecture the pipeline implements:
 
-    supervisor -->|pending_user_reply| extractor[Extractor]
-    supervisor -->|not validated| validator[Validator]
-    supervisor -->|missing_fields| ask_user[Ask User]
-    supervisor -->|not coverage_checked| coverage_checker[Coverage Checker]
-    supervisor -->|not risk_assessed| risk_screener[Risk Screener]
-    supervisor -->|not human_review_requested| await_human_review[Await Human Review]
-    supervisor -->|else| assign_or_deny[["Assign / Deny\n(interrupt_before)"]]
-
-    extractor --> supervisor
-    validator --> supervisor
-    coverage_checker --> supervisor
-    risk_screener --> supervisor
-    await_human_review --> supervisor
-
-    ask_user --> pause1([END\nawaiting_info])
-
-    assign_or_deny -->|needs_more_info| supervisor
-    assign_or_deny -->|approved / rejected| doneEnd([END\ncomplete])
-
-    style assign_or_deny fill:#7f1d1d,stroke:#f87171,color:#fff
+```
+┌────────────────────────┐
+│  Input Data Ingestion  │
+│  (App text, PDF, Voice)│
+└───────────┬────────────┘
+            ▼
+┌────────────────────────┐
+│  Deterministic Rail    │   (fnol_guardrails.py — rule-based sanitizer;
+│ (Input Sanitize Check) │    swap point for real NeMo Guardrails / Guardrails AI)
+└───────────┬────────────┘
+            ▼  (rejected input never reaches the graph)
+┌──────────────────────────────────────────────────────────────────┐
+│                       LANGGRAPH ENGINE                           │
+│                                                                   │
+│  Ingest ─► Extractor ─► Validate (stage A: policy #, name)        │
+│                                │                                  │
+│                    ┌───────────┴───────────┐                     │
+│              (missing)                 (complete)                │
+│                    ▼                         ▼                   │
+│              Disambiguate ◄─┐        Verify Policy                │
+│              (pause turn)   │        (Guidewire-style)            │
+│                    │        │              │                     │
+│                    │        │      Validate (stage B: loss detail)│
+│                    │        │              │                     │
+│                    │        │    ┌─────────┴─────────┐           │
+│                    │        │ (missing)           (complete)     │
+│                    │        └──────┘                  ▼          │
+│                    │                          Multi-Modal          │
+│                    │                          Damage Node          │
+│                    │                                  │            │
+│                    │                          Fraud & Risk          │
+│                    │                          Evaluation Node       │
+│                    │                                  │            │
+└────────────────────┼──────────────────────────────────┼────────────┘
+                      │                                  ▼
+                      │                     [ Conditional Routing ]
+                      │                     /        │          \
+                      │        (risk < 0.3)/  (0.3–0.6) \  (risk ≥ 0.6
+                      │                   /  ambiguous    \ or > $10k)
+                      │                  ▼                 ▼         ▼
+                      │           ┌──────────┐      ┌────────────┐ ┌──────────────────┐
+                      │           │Fast Track│      │ Human in   │ │ Human Adjuster    │
+                      │           │ Auto-    │      │ the Loop   │ │ Review Gate       │
+                      │           │ Approve  │      │ Interrupt  │ │ (SIU Escalation)  │
+                      │           └────┬─────┘      └─────┬──────┘ └────────┬──────────┘
+                      │                │                  └────────┬────────┘
+                      │                │                           │
+                      │                ▼                           ▼
+                      │       ┌──────────────────────────────────────────┐
+                      └──────►│      Core CMS (Guidewire / Duck Creek)   │
+                              └──────────────────────────────────────────┘
 ```
 
-The `interrupt_before=["assign_or_deny"]` compile flag means the graph
-**physically cannot execute that node** until an external `update_state()`
-call has written `human_decision` — it halts on the edge into it every
-single time a claim reaches that point, whether that's the first pass or
-the fifth `needs_more_info` cycle.
+### How the implementation maps to it — and where it deliberately differs
 
-**Supervisor** – deterministic router, same rationale as the policy-intake
-pipeline: every stage here is a fixed, unambiguous check. The one real
-judgment call (approve / deny / need more info) is handed to a human at the
-HITL gate, not decided by the router.
-
-**Extractor** – LLM structured-output extraction (`ClaimExtraction` schema)
-pulls claim fields from the latest claimant message.
-
-**Validator** – checks the 8 required fields (policy number, claimant name,
-date/type/description/location of loss, injuries reported, estimated
-damage) are present and well-formed.
-
-**Ask User** – follow-up question for missing/invalid fields; pauses the
-turn (`status: "awaiting_info"`).
-
-**Coverage Checker** – looks up the policy in a mock policy database and
-returns `in_force` / `lapsed` / `excluded` / `unknown` — a deterministic
-guardrail against paying out claims with no coverage.
-
-**Risk Screener** – mock fraud/severity heuristics (very-recent policy, no
-police report on theft/collision, high claim value, prior-claims history,
-red-flag language in the narrative) → `risk_flags` + `severity_tier`.
-
-**Await Human Review** – prints a claim summary and flags the claim
-`awaiting_human_review`. The graph is compiled with
-`interrupt_before=["assign_or_deny"]`, so it **halts here** regardless of how
-many times a claim cycles through — there's no way to reach adjuster
-assignment or denial without a human decision landing in state first.
-
-**Assign / Deny** – only runs once `graph.update_state()` has written a
-`human_decision` (`approved` / `rejected` / `needs_more_info`):
-- `approved` → mock adjuster assignment, `status: "complete"`.
-- `rejected` → `status: "complete"`, `decision: "denied"`.
-- `needs_more_info` → sets `missing_fields` to a sentinel value and routes
-  straight back to **Ask User**, deliberately leaving `validated: true`
-  untouched. The validator recomputes `missing_fields` from
-  `REQUIRED_FIELDS` alone, so if it ran first it would find all fields
-  already present and immediately erase the sentinel before Ask User ever
-  saw it. Only once the claimant replies does `pending_user_reply` route
-  through the extractor (which resets `validated: false`), letting the
-  validator run for real — then coverage + risk screening + human review
-  repeat.
-
-### Persistence & HITL mechanics
-
-State is checkpointed to a local SQLite DB (`fnol_checkpoints.sqlite`,
-git-ignored) keyed by `thread_id` (the claim ID). This means:
-
-- The `awaiting_human_review` pause is a real LangGraph `interrupt_before`,
-  not just "the script stopped" — the graph genuinely cannot proceed past
-  it without an external `update_state()` call.
-- A claim can sit paused for review indefinitely, including across process
-  restarts — resume it later by re-running with the same `claim_id`.
+| Diagram box | Implementation | Notes |
+|---|---|---|
+| Input Data Ingestion (App/PDF/Voice) | `fnol_main.run_preflight()` → `fnol_tools.extract_pdf_text` (real, via `pypdf`) / `fnol_tools.transcribe_voice` (real, OpenAI Whisper) | Runs **before** a graph thread is even created |
+| Deterministic Rail | `fnol_guardrails.run_deterministic_rail()` | Rule-based: prompt-injection patterns, SSN/card-number redaction, length checks. Swap point for real NeMo Guardrails / Guardrails AI |
+| Ingest Node | `fnol_agents/ingest.py` | Inside the graph, this is just the state-machine kickoff — all real extraction already happened in the pre-flight step |
+| Verify Policy (Guidewire API) | `fnol_agents/verify_policy.py` → `fnol_tools.verify_policy()` (mock PolicyCenter) | Split into two stages (see below) rather than one box |
+| Missing Fields? / Disambiguate | `fnol_agents/validate_stage_a.py` + `validate_stage_b.py` + `fnol_agents/disambiguate.py` | **Two validation stages, not one.** Policy-identifying fields (policy #, name) are checked *before* Verify Policy runs — you can't look up a policy you don't have a number for. Full loss-detail fields are checked *after*, feeding a second Disambiguate pass if needed |
+| Multi-Modal Damage Node | `fnol_agents/damage_analysis.py` → `fnol_tools.analyze_damage_photo()` (real, OpenAI vision) | Runs if a `photo_path` was attached; otherwise proceeds with a neutral placeholder |
+| Fraud & Risk Evaluation Node | `fnol_agents/fraud_risk.py` → `fnol_tools.compute_risk_score()` | Also runs the full loss-coverage check (`check_loss_coverage`) here, now that loss_type/date are known, and **decides the routing outcome itself** (see thresholds below) |
+| Conditional Routing | `route_after_risk()` in `fnol_graph.py`, reading `route_decision` set by fraud_risk_node | risk < 0.3 & in-coverage & ≤ $10k → `fast_track`; 0.3 ≤ risk < 0.6 → `hitl_ambiguous`; risk ≥ 0.6, amount > $10k, or coverage not in force → `adjuster_review` (SIU-flagged only when the *risk score itself*, not just claim value, crossed 0.6) |
+| Fast Track Auto-Approve | `fnol_agents/fast_track_approve.py` | The **only** auto-approval path in the pipeline |
+| Human in the Loop Interrupt / Human Adjuster Review Gate | `fnol_agents/await_human_review.py` + `fnol_agents/assign_or_deny.py`, gated by `interrupt_before=["assign_or_deny"]` | Both diagram gates share one implementation — same mandatory-human mechanics, differentiated by `route_decision`/`siu_escalated` in the printed summary and in `final_claim` |
+| Core CMS (Guidewire / Duck Creek) | `fnol_tools.submit_to_cms()` | Mock — returns a generated claim ID; both `fast_track_approve` and `assign_or_deny` call it on a terminal decision |
 
 ### Quick Start
 
@@ -216,12 +204,18 @@ pip install -r requirements.txt
 cp .env.example .env
 # then edit .env and fill in OPENAI_API_KEY
 
-# 3. Run the scripted scenarios (clean approval, coverage denial, high-risk
-#    claim that gets sent back for more info before approval)
+# 3. Run the scripted scenarios — one per routing outcome:
+#    fast-track auto-approve, HITL quick sign-off, adjuster+SIU (high risk),
+#    adjuster review (lapsed policy → denied)
 python fnol_main.py
 
-# 4. Or file + review a claim live (you play both claimant and reviewer)
+# 4. Chat live (you play both claimant and reviewer)
 python fnol_main.py --interactive
+
+# 5. File a real claim from an actual PDF/audio file + photo
+python fnol_main.py --claim --channel pdf --file claim_form.pdf --photo damage.jpg --claim-id my-claim-1
+python fnol_main.py --claim --channel voice --file voicemail.m4a --claim-id my-claim-2
+python fnol_main.py --claim --channel app --text "..." --photo damage.jpg --claim-id my-claim-3
 ```
 
 ### Files
@@ -229,18 +223,35 @@ python fnol_main.py --interactive
 | File | Description |
 |---|---|
 | `fnol_state.py` | Shared `FNOLState` TypedDict used by every node |
-| `fnol_schema.py` | `ClaimExtraction` pydantic schema, required fields, follow-up prompts |
-| `fnol_tools.py` | Mock policy DB, coverage check, fraud/severity heuristics, adjuster assignment |
+| `fnol_schema.py` | `ClaimExtraction` schema, `STAGE_A_FIELDS`/`STAGE_B_FIELDS`, follow-up prompts |
+| `fnol_guardrails.py` | Deterministic Rail — rule-based input sanitizer (pre-graph) |
+| `fnol_tools.py` | Mock Guidewire policy DB, PDF/voice/photo ingestion helpers, risk scoring, CMS submission, adjuster/SIU assignment |
+| `fnol_agents/ingest.py` | State-machine kickoff — appends the pre-processed text as a `HumanMessage` |
 | `fnol_agents/extractor.py` | Extracts claim fields from the latest message |
-| `fnol_agents/validator.py` | Checks completeness/format of `claim_data` |
-| `fnol_agents/ask_user.py` | Asks the follow-up question, pauses the turn |
-| `fnol_agents/coverage_checker.py` | Mock policy lookup → coverage status |
-| `fnol_agents/risk_screener.py` | Mock fraud/severity scoring |
+| `fnol_agents/validate_stage_a.py` | Checks policy-identifying fields before policy lookup |
+| `fnol_agents/verify_policy.py` | Guidewire-style policy identity/status lookup |
+| `fnol_agents/validate_stage_b.py` | Checks full loss-detail fields after policy verification |
+| `fnol_agents/disambiguate.py` | Follow-up question for either validation stage; pauses the turn |
+| `fnol_agents/damage_analysis.py` | Multi-modal damage-photo analysis (OpenAI vision) |
+| `fnol_agents/fraud_risk.py` | Full coverage check + fraud/severity scoring + routing decision |
+| `fnol_agents/fast_track_approve.py` | Auto-approval path (only reachable for risk < 0.3) |
 | `fnol_agents/await_human_review.py` | Flags the claim for mandatory review (pairs with `interrupt_before`) |
-| `fnol_agents/assign_or_deny.py` | Acts on the human reviewer's decision — the only node with a terminal path |
-| `fnol_supervisor.py` | Deterministic router |
-| `fnol_graph.py` | LangGraph `StateGraph` wiring + `interrupt_before` HITL gate |
-| `fnol_main.py` | Entry point: SQLite checkpointer setup, scripted scenarios, `--interactive` mode |
+| `fnol_agents/assign_or_deny.py` | Acts on the human reviewer's decision — the only other terminal node |
+| `fnol_supervisor.py` | Deterministic router for the sequential collection/verification stages |
+| `fnol_graph.py` | LangGraph `StateGraph` wiring + risk-based conditional edge + HITL gate |
+| `fnol_main.py` | Pre-flight (ingestion + rail), SQLite checkpointer, scripted scenarios, `--interactive` and `--claim` (real file) modes |
+
+### Persistence & HITL mechanics
+
+State is checkpointed to a local SQLite DB (`fnol_checkpoints.sqlite`,
+git-ignored) keyed by `thread_id` (the claim ID). The
+`interrupt_before=["assign_or_deny"]` compile flag means that node
+**physically cannot execute** until an external `graph.update_state()` call
+has written `human_decision` — it halts on the edge into it every time a
+claim reaches that point, whether that's the first pass or a repeat cycle
+after `needs_more_info`. A claim can sit paused for review indefinitely,
+including across process restarts — resume it later by re-running with the
+same `claim_id`.
 
 ### Customisation
 
@@ -248,8 +259,14 @@ python fnol_main.py --interactive
   `awaiting_human_review` branch with a call into your claims queue /
   review dashboard; the mechanics (`update_state` + `invoke(None, config)`)
   stay the same regardless of where the decision comes from.
+- **Real Deterministic Rail**: `fnol_guardrails.run_deterministic_rail()` is
+  the only place the rail logic lives — swap it for a real NeMo Guardrails
+  or Guardrails AI call without touching anything else.
 - **Swap the checkpoint backend**: `fnol_main.get_checkpointer()` is the
   only place that constructs the `SqliteSaver` — point it at Postgres
   (`langgraph-checkpoint-postgres`) for multi-process/deployed use.
-- **Real coverage/fraud data**: swap the mock lookups in `fnol_tools.py`
-  for calls into a real policy admin system and fraud model.
+- **Real coverage/fraud/CMS data**: swap the mock lookups in `fnol_tools.py`
+  (`verify_policy`, `check_loss_coverage`, `compute_risk_score`,
+  `submit_to_cms`) for calls into a real Guidewire/Duck Creek instance and
+  fraud model — every one of those functions has a fixed, narrow contract
+  so the swap doesn't ripple into the graph nodes that call them.

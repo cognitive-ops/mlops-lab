@@ -1,7 +1,7 @@
 """
-Ask-user agent – turns the validator's missing/invalid field list into a
-follow-up question and pauses the graph (ends the turn) so the caller can
-supply the answer on the next invocation.
+Disambiguate node – turns the current missing/invalid field list (from
+either validation stage) into a follow-up question and pauses the graph
+(ends the turn) so the caller can supply the answer on the next invocation.
 """
 
 from langchain_core.messages import AIMessage
@@ -10,7 +10,7 @@ from fnol_schema import FIELD_PROMPTS
 from fnol_state import FNOLState
 
 
-def ask_user_node(state: FNOLState) -> dict:
+def disambiguate_node(state: FNOLState) -> dict:
     """LangGraph node: prompt the claimant for the still-missing fields."""
 
     missing = state.get("missing_fields", [])

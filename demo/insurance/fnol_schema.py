@@ -29,9 +29,13 @@ class ClaimExtraction(BaseModel):
     )
 
 
-REQUIRED_FIELDS = [
-    "policy_number",
-    "claimant_name",
+# Stage A: identifying info needed before we can even look the policy up
+# (mirrors the diagram's Ingest -> Verify Policy ordering — no point asking
+# for loss details before confirming there's a real, in-force policy).
+STAGE_A_FIELDS = ["policy_number", "claimant_name"]
+
+# Stage B: full loss-detail fields, collected once the policy is verified.
+STAGE_B_FIELDS = [
     "date_of_loss",
     "loss_type",
     "loss_description",
@@ -39,6 +43,8 @@ REQUIRED_FIELDS = [
     "injuries_reported",
     "estimated_damage_amount",
 ]
+
+REQUIRED_FIELDS = STAGE_A_FIELDS + STAGE_B_FIELDS
 
 FIELD_PROMPTS = {
     "policy_number": "What is your policy number?",

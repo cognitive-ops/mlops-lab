@@ -3,20 +3,42 @@ LangGraph StateGraph wiring for the FNOL claims intake pipeline.
 
 Graph topology:
 
-    START ──► supervisor ──► extractor ─────────► supervisor
-                         ├──► validator ─────────► supervisor
-                         ├──► ask_user ───────────► END (pause for reply)
-                         ├──► coverage_checker ───► supervisor
-                         ├──► risk_screener ──────► supervisor
-                         ├──► await_human_review ─► supervisor
-                         └──► assign_or_deny ──┬──► supervisor (needs_more_info)
-                                                └──► END (approved / rejected)
+    START ──► supervisor ◄────────────────────────────────────────────┐
+                  │ routes to                                        │
+     ┌────────────┼────────────┬──────────────┬─────────────┬────────┘
+     ▼            ▼            ▼              ▼             ▼
+  ingest ──► extractor    validate_stage_a  verify_policy  validate_stage_b
+     │            │              │              │               │
+     └────────────┴──────────────┴──────────────┴───────────────┘
+                                  │ (all loop back to supervisor except
+                                  │  the two branches below)
+                                  ▼
+                validate_stage_a / validate_stage_b ──► disambiguate ──► END (pause)
+                                  │ (fields complete)
+                                  ▼
+                          damage_analysis ──► fraud_risk
+                                                  │
+                                     ┌────────────┴────────────┐
+                                (fast_track)              (hitl_ambiguous /
+                                     │                     adjuster_review)
+                                     ▼                          ▼
+                          fast_track_approve          await_human_review
+                                     │                          │
+                                    END                    supervisor
+                                                                 │
+                                                        ── interrupt_before ──
+                                                                 │
+                                                          assign_or_deny
+                                                        ┌────────┴────────┐
+                                              (needs_more_info)      (approved/
+                                                     │                rejected)
+                                                     ▼                   ▼
+                                                supervisor               END
 
-The graph is compiled with `interrupt_before=["assign_or_deny"]` — execution
-halts right after await_human_review runs and before assign_or_deny ever
-executes, so a claim can only be assigned to an adjuster or denied once a
-human reviewer has written a decision into state via `graph.update_state()`.
-There is no auto-approval path.
+`interrupt_before=["assign_or_deny"]` means that node can only run once a
+human reviewer has written a decision into state via `graph.update_state()`
+— fast_track_approve is the only auto-approval path, and it's only reachable
+when fraud_risk_node's own routing decision sends a claim there directly.
 """
 
 from typing import Literal
@@ -24,12 +46,16 @@ from typing import Literal
 from langgraph.graph import END, StateGraph
 
 from fnol_agents.assign_or_deny import assign_or_deny_node
-from fnol_agents.ask_user import ask_user_node
 from fnol_agents.await_human_review import await_human_review_node
-from fnol_agents.coverage_checker import coverage_checker_node
+from fnol_agents.damage_analysis import damage_analysis_node
+from fnol_agents.disambiguate import disambiguate_node
 from fnol_agents.extractor import extractor_node
-from fnol_agents.risk_screener import risk_screener_node
-from fnol_agents.validator import validator_node
+from fnol_agents.fast_track_approve import fast_track_approve_node
+from fnol_agents.fraud_risk import fraud_risk_node
+from fnol_agents.ingest import ingest_node
+from fnol_agents.validate_stage_a import validate_stage_a_node
+from fnol_agents.validate_stage_b import validate_stage_b_node
+from fnol_agents.verify_policy import verify_policy_node
 from fnol_state import FNOLState
 from fnol_supervisor import supervisor_node
 
@@ -38,16 +64,24 @@ from fnol_supervisor import supervisor_node
 # Routing functions (conditional edges)
 # ---------------------------------------------------------------------------
 def route_supervisor(state: FNOLState) -> Literal[
-    "extractor", "validator", "ask_user", "coverage_checker",
-    "risk_screener", "await_human_review", "assign_or_deny",
+    "ingest", "extractor", "validate_stage_a", "disambiguate",
+    "verify_policy", "validate_stage_b", "damage_analysis",
+    "fraud_risk", "assign_or_deny",
 ]:
     """Read next_agent from state and route accordingly."""
     next_agent = state.get("next_agent", "assign_or_deny")
     valid = (
-        "extractor", "validator", "ask_user", "coverage_checker",
-        "risk_screener", "await_human_review", "assign_or_deny",
+        "ingest", "extractor", "validate_stage_a", "disambiguate",
+        "verify_policy", "validate_stage_b", "damage_analysis",
+        "fraud_risk", "assign_or_deny",
     )
     return next_agent if next_agent in valid else "assign_or_deny"
+
+
+def route_after_risk(state: FNOLState) -> Literal["fast_track_approve", "await_human_review"]:
+    """fraud_risk_node's own routing decision — the risk-based conditional
+    branch from the target architecture (risk < 0.3 / ambiguous / high-risk)."""
+    return "fast_track_approve" if state.get("route_decision") == "fast_track" else "await_human_review"
 
 
 def route_after_decision(state: FNOLState) -> Literal["supervisor", "end"]:
@@ -65,11 +99,15 @@ def build_graph() -> StateGraph:
 
     # ── Nodes ──────────────────────────────────────────────────────────────
     workflow.add_node("supervisor", supervisor_node)
+    workflow.add_node("ingest", ingest_node)
     workflow.add_node("extractor", extractor_node)
-    workflow.add_node("validator", validator_node)
-    workflow.add_node("ask_user", ask_user_node)
-    workflow.add_node("coverage_checker", coverage_checker_node)
-    workflow.add_node("risk_screener", risk_screener_node)
+    workflow.add_node("validate_stage_a", validate_stage_a_node)
+    workflow.add_node("verify_policy", verify_policy_node)
+    workflow.add_node("validate_stage_b", validate_stage_b_node)
+    workflow.add_node("disambiguate", disambiguate_node)
+    workflow.add_node("damage_analysis", damage_analysis_node)
+    workflow.add_node("fraud_risk", fraud_risk_node)
+    workflow.add_node("fast_track_approve", fast_track_approve_node)
     workflow.add_node("await_human_review", await_human_review_node)
     workflow.add_node("assign_or_deny", assign_or_deny_node)
 
@@ -81,26 +119,41 @@ def build_graph() -> StateGraph:
         "supervisor",
         route_supervisor,
         {
+            "ingest": "ingest",
             "extractor": "extractor",
-            "validator": "validator",
-            "ask_user": "ask_user",
-            "coverage_checker": "coverage_checker",
-            "risk_screener": "risk_screener",
-            "await_human_review": "await_human_review",
+            "validate_stage_a": "validate_stage_a",
+            "disambiguate": "disambiguate",
+            "verify_policy": "verify_policy",
+            "validate_stage_b": "validate_stage_b",
+            "damage_analysis": "damage_analysis",
+            "fraud_risk": "fraud_risk",
             "assign_or_deny": "assign_or_deny",
         },
     )
 
-    # Extractor, validator, coverage_checker, risk_screener, await_human_review
-    # all loop back to the supervisor.
+    # Deterministic sequential stages loop back to the supervisor, which
+    # decides the next stage (or branches to disambiguate on missing fields).
+    workflow.add_edge("ingest", "extractor")
     workflow.add_edge("extractor", "supervisor")
-    workflow.add_edge("validator", "supervisor")
-    workflow.add_edge("coverage_checker", "supervisor")
-    workflow.add_edge("risk_screener", "supervisor")
+    workflow.add_edge("validate_stage_a", "supervisor")
+    workflow.add_edge("verify_policy", "supervisor")
+    workflow.add_edge("validate_stage_b", "supervisor")
+    workflow.add_edge("damage_analysis", "supervisor")
     workflow.add_edge("await_human_review", "supervisor")
 
-    # ask_user pauses the turn (caller supplies the reply and re-invokes).
-    workflow.add_edge("ask_user", END)
+    # disambiguate pauses the turn (caller supplies the reply and re-invokes).
+    workflow.add_edge("disambiguate", END)
+
+    # fraud_risk makes the one real routing call itself (risk-based), and
+    # its outgoing edge acts on that decision directly.
+    workflow.add_conditional_edges(
+        "fraud_risk",
+        route_after_risk,
+        {"fast_track_approve": "fast_track_approve", "await_human_review": "await_human_review"},
+    )
+
+    # fast_track_approve is the only auto-approval path; it ends the run.
+    workflow.add_edge("fast_track_approve", END)
 
     # assign_or_deny either reopens the loop (needs_more_info) or ends the run.
     workflow.add_conditional_edges(
