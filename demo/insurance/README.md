@@ -194,6 +194,58 @@ This is the architecture the pipeline implements:
 | Human in the Loop Interrupt / Human Adjuster Review Gate | `fnol_agents/await_human_review.py` + `fnol_agents/assign_or_deny.py`, gated by `interrupt_before=["assign_or_deny"]` | Both diagram gates share one implementation — same mandatory-human mechanics, differentiated by `route_decision`/`siu_escalated` in the printed summary and in `final_claim` |
 | Core CMS (Guidewire / Duck Creek) | `fnol_tools.submit_to_cms()` | Mock — returns a generated claim ID; both `fast_track_approve` and `assign_or_deny` call it on a terminal decision |
 
+### Actual graph wiring
+
+The diagram above is the target architecture; this is what `fnol_graph.py`
+literally builds — every node and edge below has a 1:1 line in the code.
+
+```mermaid
+flowchart TD
+    START([START]) --> supervisor{Supervisor}
+
+    supervisor -->|pending_user_reply| ingest[Ingest]
+    supervisor -->|ingested| extractor[Extractor]
+    supervisor -->|not validated_stage_a| validate_a[Validate stage A]
+    supervisor -->|stage A missing| disambiguate[Disambiguate]
+    supervisor -->|not policy_verified| verify_policy[Verify Policy]
+    supervisor -->|not validated_stage_b| validate_b[Validate stage B]
+    supervisor -->|stage B missing| disambiguate
+    supervisor -->|not damage_analyzed| damage[Damage Analysis]
+    supervisor -->|not risk_assessed| fraud_risk[Fraud & Risk]
+    supervisor -->|else| assign_or_deny[["Assign / Deny\n(interrupt_before)"]]
+
+    ingest --> extractor
+    extractor --> supervisor
+    validate_a --> supervisor
+    verify_policy --> supervisor
+    validate_b --> supervisor
+    damage --> supervisor
+    await_review --> supervisor
+
+    disambiguate --> pause([END\nawaiting_info])
+
+    fraud_risk -->|route_decision == fast_track| fast_track[Fast Track Approve]
+    fraud_risk -->|hitl_ambiguous / adjuster_review| await_review[Await Human Review]
+
+    fast_track --> doneEnd1([END\ncomplete])
+
+    assign_or_deny -->|needs_more_info| supervisor
+    assign_or_deny -->|approved / rejected| doneEnd2([END\ncomplete])
+
+    style assign_or_deny fill:#7f1d1d,stroke:#f87171,color:#fff
+    style fast_track fill:#14532d,stroke:#4ade80,color:#fff
+```
+
+Two things worth calling out that aren't obvious from the box shapes:
+
+- **`ingest → extractor` is a direct edge**, not a supervisor round-trip —
+  ingestion always leads straight to extraction, no branching in between.
+- **`fraud_risk` picks its own next node.** Every other stage loops back to
+  the supervisor for a decision; fraud_risk_node computes `route_decision`
+  itself and its outgoing edge (`route_after_risk`) just acts on it
+  directly — the supervisor is never consulted on the one decision that
+  actually matters.
+
 ### Quick Start
 
 ```bash
