@@ -12,6 +12,8 @@
 *.zip
 **/venv/
 venv/
+**/.venv/
+.venv/
 
 .DS_Store
 **/.env

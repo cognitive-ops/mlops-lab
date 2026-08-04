@@ -1,0 +1,8 @@
+define flow deterministic sanitization rail
+  $rail_result = execute deterministic_sanitize_check
+  if not $rail_result["passed"]
+    bot refuse to respond
+    stop
+
+define bot refuse to respond
+  "Input rejected by deterministic sanitization rail."

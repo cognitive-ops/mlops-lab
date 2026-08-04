@@ -1,0 +1,16 @@
+# NeMo Guardrails config for the FNOL pre-graph Deterministic Rail.
+#
+# `main` model is declared because RailsConfig requires one, but it is never
+# actually called: run_deterministic_rail() (see ../fnol_guardrails.py) runs
+# with options.rails=["input"], so execution stops after the input flow in
+# rails/deterministic.co — the sanitization decision stays a plain Python
+# action (actions.py), not an LLM judgment call.
+models:
+  - type: main
+    engine: openai
+    model: gpt-4o-mini
+
+rails:
+  input:
+    flows:
+      - deterministic sanitization rail

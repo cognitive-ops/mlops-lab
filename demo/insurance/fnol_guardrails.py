@@ -1,29 +1,34 @@
 """
 Deterministic Rail — input sanitization gate that runs BEFORE the LangGraph
 engine, matching the target architecture where the guardrail sits outside
-the graph entirely. Rule-based on purpose: sanitization decisions (prompt
-injection, unredacted PII, empty/garbage input) should be deterministic and
-auditable, not left to an LLM's judgment.
+the graph entirely.
 
-This is a lightweight stand-in for a real deployment's NeMo Guardrails /
-Guardrails AI rail — same contract (text in, pass/fail + flags out), so
-swapping in the real thing later only touches this one module.
+Backed by real NeMo Guardrails (see guardrails_config/). The sanitization
+logic itself (prompt-injection patterns, SSN/card-number redaction, length
+checks) is a plain Python action — guardrails_config/actions.py — invoked
+by an input-only Colang flow, so the pass/fail decision stays rule-based and
+auditable rather than an LLM's judgment call. `run_deterministic_rail()`
+calls NeMo Guardrails with `options.rails=["input"]`, so this never reaches
+the main LLM — same cost/latency profile as the old inline-regex version.
 """
 
-import re
+from pathlib import Path
+from typing import Optional
 
-PROMPT_INJECTION_PATTERNS = (
-    re.compile(r"ignore (all |any )?(previous|prior|above) instructions", re.IGNORECASE),
-    re.compile(r"you are now (in )?(dan|developer|jailbreak) mode", re.IGNORECASE),
-    re.compile(r"^\s*system\s*:", re.IGNORECASE),
-    re.compile(r"disregard (the|your) (system prompt|instructions)", re.IGNORECASE),
-)
+from nemoguardrails import LLMRails, RailsConfig
+from nemoguardrails.rails.llm.options import GenerationOptions
 
-SSN_PATTERN = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
-CREDIT_CARD_PATTERN = re.compile(r"\b(?:\d[ -]*?){13,16}\b")
+CONFIG_PATH = Path(__file__).parent / "guardrails_config"
 
-MIN_LENGTH = 3
-MAX_LENGTH = 8000
+_rails: Optional[LLMRails] = None
+
+
+def _get_rails() -> LLMRails:
+    global _rails
+    if _rails is None:
+        config = RailsConfig.from_path(str(CONFIG_PATH))
+        _rails = LLMRails(config)
+    return _rails
 
 
 def run_deterministic_rail(text: str) -> dict:
@@ -35,30 +40,22 @@ def run_deterministic_rail(text: str) -> dict:
     inputs that otherwise pass the rail.
     """
 
-    flags = []
-    stripped = (text or "").strip()
+    rails = _get_rails()
+    options = GenerationOptions(rails=["input"], output_vars=["rail_result"])
+    response = rails.generate(
+        messages=[{"role": "user", "content": text or ""}],
+        options=options,
+    )
 
-    if len(stripped) < MIN_LENGTH:
-        flags.append("input_too_short")
-    if len(stripped) > MAX_LENGTH:
-        flags.append("input_too_long")
+    output_data = response.output_data or {}
+    rail_result = output_data.get("rail_result")
+    if rail_result is None:
+        # Input flow never ran (e.g. empty message short-circuited earlier) —
+        # fail closed rather than silently letting unchecked text through.
+        return {
+            "passed": False,
+            "flags": ["rail_result_missing"],
+            "redacted_text": (text or "").strip(),
+        }
 
-    for pattern in PROMPT_INJECTION_PATTERNS:
-        if pattern.search(stripped):
-            flags.append("prompt_injection_pattern")
-            break
-
-    redacted = stripped
-    if SSN_PATTERN.search(stripped):
-        flags.append("possible_ssn_detected")
-        redacted = SSN_PATTERN.sub("[REDACTED-SSN]", redacted)
-    if CREDIT_CARD_PATTERN.search(stripped):
-        flags.append("possible_card_number_detected")
-        redacted = CREDIT_CARD_PATTERN.sub("[REDACTED-CARD]", redacted)
-
-    # PII redaction doesn't fail the rail — it sanitizes and lets the claim
-    # through. Injection attempts and malformed input do fail it.
-    blocking_flags = {"input_too_short", "input_too_long", "prompt_injection_pattern"}
-    passed = not any(flag in blocking_flags for flag in flags)
-
-    return {"passed": passed, "flags": flags, "redacted_text": redacted}
+    return rail_result
