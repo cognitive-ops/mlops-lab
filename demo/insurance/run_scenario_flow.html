@@ -1,0 +1,285 @@
+<title>run_scenario() control flow</title>
+<style>
+  :root {
+    --bg: #f4f6f8;
+    --surface: #ffffff;
+    --ink: #1b2430;
+    --muted: #5b6b7c;
+    --line: #b9c4cf;
+    --accent: #b5651d;
+    --accent-tint: #f2e3d3;
+    --success: #29785a;
+    --success-tint: #dceee5;
+    --code-bg: #ecf0f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10151c;
+      --surface: #171f29;
+      --ink: #e6ebf1;
+      --muted: #93a3b5;
+      --line: #37455230;
+      --line: #3a4856;
+      --accent: #d98a4c;
+      --accent-tint: #3a2c1c;
+      --success: #4fae86;
+      --success-tint: #163226;
+      --code-bg: #1e2732;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10151c;
+    --surface: #171f29;
+    --ink: #e6ebf1;
+    --muted: #93a3b5;
+    --line: #3a4856;
+    --accent: #d98a4c;
+    --accent-tint: #3a2c1c;
+    --success: #4fae86;
+    --success-tint: #163226;
+    --code-bg: #1e2732;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f6f8;
+    --surface: #ffffff;
+    --ink: #1b2430;
+    --muted: #5b6b7c;
+    --line: #b9c4cf;
+    --accent: #b5651d;
+    --accent-tint: #f2e3d3;
+    --success: #29785a;
+    --success-tint: #dceee5;
+    --code-bg: #ecf0f3;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  }
+  main {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 48px 24px 72px;
+  }
+  .eyebrow {
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+    margin: 0 0 8px;
+  }
+  h1 {
+    font-size: 26px;
+    font-weight: 700;
+    margin: 0 0 6px;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+  code, .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.92em;
+  }
+  p.lede {
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1.55;
+    max-width: 62ch;
+    margin: 0 0 36px;
+  }
+  p.lede code {
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  figure {
+    margin: 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 20px 20px 8px;
+  }
+  figure svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  figcaption {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.5;
+    padding: 14px 4px 18px;
+    border-top: 1px solid var(--line);
+    margin-top: 12px;
+  }
+
+  .diagram-scroll { overflow-x: auto; }
+
+  .legend {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin: 22px 2px 0;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 11px; height: 11px; border-radius: 2px; flex: none; }
+  .swatch.decision { background: var(--accent-tint); border: 1.5px solid var(--accent); }
+  .swatch.success { background: var(--success-tint); border: 1.5px solid var(--success); }
+  .swatch.neutral { background: var(--code-bg); border: 1.5px solid var(--line); }
+
+  .notes {
+    margin-top: 40px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 20px;
+  }
+  .notes h2 {
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 8px;
+    font-weight: 600;
+  }
+  .notes p {
+    margin: 0;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--ink);
+  }
+</style>
+
+<main>
+  <p class="eyebrow">main.py — insurance demo</p>
+  <h1><code>run_scenario()</code> drive loop</h1>
+  <p class="lede">
+    What happens on each pass through <code>for _ in range(max_rounds): state = app.invoke(state)</code> —
+    the three ways the loop can end, and the two ways it feeds itself back in.
+  </p>
+
+  <div class="diagram-scroll">
+  <figure>
+    <svg viewBox="0 0 860 780" role="img" aria-label="Flowchart of run_scenario: initial_state feeds a loop that invokes the graph, branches on state status into complete, awaiting_info, or other, and exits via success after complete, or two partial-return paths — StopIteration on scripted replies, or max_rounds exhausted.">
+      <defs>
+        <marker id="arrInk" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)" />
+        </marker>
+        <marker id="arrAccent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)" />
+        </marker>
+        <marker id="arrSuccess" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--success)" />
+        </marker>
+      </defs>
+
+      <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5">
+
+        <!-- Start box -->
+        <rect x="290" y="24" width="280" height="46" rx="7" fill="var(--code-bg)" stroke="var(--line)" />
+        <text x="430" y="52" text-anchor="middle" fill="var(--ink)">initial_state(first_message)</text>
+
+        <line x1="430" y1="70" x2="430" y2="112" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arrInk)" />
+
+        <!-- Loop container -->
+        <rect x="60" y="116" width="740" height="480" rx="14" fill="none" stroke="var(--line)" stroke-width="1.5" stroke-dasharray="5 4" />
+        <text x="80" y="139" font-size="12" fill="var(--muted)">for _ in range(max_rounds):  ·  default 6</text>
+
+        <!-- Invoke box -->
+        <rect x="290" y="158" width="280" height="46" rx="7" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5" />
+        <text x="430" y="186" text-anchor="middle" fill="var(--ink)">state = app.invoke(state)</text>
+
+        <line x1="430" y1="204" x2="430" y2="228" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arrInk)" />
+
+        <!-- Decision diamond -->
+        <polygon points="430,238 545,320 430,402 315,320" fill="var(--accent-tint)" stroke="var(--accent)" stroke-width="1.5" />
+        <text x="430" y="316" text-anchor="middle" font-weight="600" fill="var(--ink)">status?</text>
+        <text x="430" y="332" text-anchor="middle" font-size="10.5" fill="var(--muted)">state["status"]</text>
+
+        <!-- Branch: complete -->
+        <line x1="545" y1="320" x2="596" y2="320" stroke="var(--success)" stroke-width="1.5" marker-end="url(#arrSuccess)" />
+        <text x="570" y="309" text-anchor="middle" font-size="11" fill="var(--success)">complete</text>
+        <rect x="600" y="296" width="170" height="48" rx="7" fill="var(--success-tint)" stroke="var(--success)" stroke-width="1.5" />
+        <text x="685" y="325" text-anchor="middle" fill="var(--ink)">status == "complete"</text>
+
+        <!-- complete -> success exit (outside container) -->
+        <line x1="685" y1="344" x2="685" y2="656" stroke="var(--success)" stroke-width="1.5" marker-end="url(#arrSuccess)" />
+
+        <!-- Branch: awaiting_info -->
+        <line x1="315" y1="320" x2="264" y2="320" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arrAccent)" />
+        <text x="290" y="309" text-anchor="middle" font-size="11" fill="var(--accent)">awaiting_info</text>
+        <rect x="90" y="296" width="174" height="48" rx="7" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.5" />
+        <text x="177" y="316" text-anchor="middle" fill="var(--ink)">next(followup_iter)</text>
+        <text x="177" y="332" text-anchor="middle" font-size="10.5" fill="var(--muted)">append reply → messages</text>
+
+        <!-- awaiting_info normal case: loop back to invoke (left back-edge) -->
+        <path d="M 90,320 L 62,320 L 62,181 L 286,181" fill="none" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arrAccent)" />
+        <text x="66" y="250" font-size="10.5" fill="var(--accent)" transform="rotate(-90 66 250)" text-anchor="middle">reply queued → loop back</text>
+
+        <!-- awaiting_info StopIteration: dashed exit down through container -->
+        <line x1="177" y1="344" x2="177" y2="656" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arrAccent)" />
+        <text x="184" y="500" font-size="10.5" fill="var(--accent)">StopIteration —</text>
+        <text x="184" y="514" font-size="10.5" fill="var(--accent)">no scripted replies left</text>
+
+        <!-- Branch: other status -->
+        <path d="M 430,402 L 430,430 L 740,430 L 740,181 L 574,181" fill="none" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arrInk)" />
+        <text x="585" y="424" font-size="10.5" fill="var(--muted)">other status (e.g. "collecting") → continue</text>
+
+        <!-- container exhausted -->
+        <line x1="430" y1="596" x2="430" y2="656" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arrAccent)" />
+        <text x="440" y="628" font-size="10.5" fill="var(--accent)">max_rounds reached</text>
+
+        <!-- Exit row -->
+        <rect x="40" y="656" width="280" height="58" rx="7" fill="var(--accent-tint)" stroke="var(--accent)" stroke-width="1.5" />
+        <text x="180" y="680" text-anchor="middle" fill="var(--ink)">return final_application</text>
+        <text x="180" y="696" text-anchor="middle" font-size="10.5" fill="var(--muted)">partial — no more replies</text>
+
+        <rect x="330" y="656" width="200" height="58" rx="7" fill="var(--accent-tint)" stroke="var(--accent)" stroke-width="1.5" />
+        <text x="430" y="680" text-anchor="middle" fill="var(--ink)">return final_application</text>
+        <text x="430" y="696" text-anchor="middle" font-size="10.5" fill="var(--muted)">partial — round limit hit</text>
+
+        <rect x="580" y="656" width="210" height="58" rx="7" fill="var(--success-tint)" stroke="var(--success)" stroke-width="1.5" />
+        <text x="685" y="680" text-anchor="middle" fill="var(--ink)">return final_application</text>
+        <text x="685" y="696" text-anchor="middle" font-size="10.5" fill="var(--muted)">✓ complete</text>
+
+      </g>
+    </svg>
+    <figcaption>
+      Each pass calls <code>app.invoke</code> once, then branches on the resulting <code>status</code>.
+      <code>complete</code> returns immediately (green). <code>awaiting_info</code> pulls the next scripted
+      reply and loops back — unless the script has run out, which returns early instead. Any other status
+      just loops back. If none of that resolves the intake within <code>max_rounds</code> passes (default 6),
+      the loop falls through and returns whatever state it has.
+    </figcaption>
+  </figure>
+  </div>
+
+  <div class="legend">
+    <span><i class="swatch decision"></i> decision / partial-return path</span>
+    <span><i class="swatch success"></i> success path</span>
+    <span><i class="swatch neutral"></i> state mutation</span>
+  </div>
+
+  <div class="notes">
+    <div>
+      <h2>Why a round cap</h2>
+      <p>Without <code>max_rounds</code>, an agent stuck asking for the same field forever — or a followup
+      script that never satisfies it — would hang the scenario indefinitely.</p>
+    </div>
+    <div>
+      <h2>Two different "unfinished"</h2>
+      <p>A round-limit exit and a StopIteration exit both return a partial <code>final_application</code>,
+      but for different reasons — worth distinguishing when debugging a scenario that didn't complete.</p>
+    </div>
+    <div>
+      <h2>State carries forward</h2>
+      <p>Nothing resets between iterations — <code>state</code> from one <code>invoke</code> is fed directly
+      into the next, so <code>applicant_data</code>, <code>risk_flags</code>, etc. accumulate across rounds.</p>
+    </div>
+  </div>
+</main>

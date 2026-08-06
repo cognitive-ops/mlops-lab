@@ -7,6 +7,7 @@ Run:
     python main.py --interactive   # chat with the agent in your terminal
 """
 
+import logging
 import os
 import sys
 
@@ -16,6 +17,12 @@ from langchain_core.messages import HumanMessage
 from graph import compile_graph
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.DEBUG if os.getenv("DEBUG") else logging.INFO,
+    format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+)
+logger = logging.getLogger("insurance_demo")
 
 
 def initial_state(message: str) -> dict:
@@ -49,22 +56,30 @@ def run_scenario(name: str, first_message: str, followups: list, max_rounds: int
     print(f"{'=' * 80}\n")
     print(f"Applicant: {first_message}\n")
 
-    for _ in range(max_rounds):
+    for round_num in range(max_rounds):
+        logger.debug("round %d: invoking graph, pre-status=%r", round_num, state.get("status"))
         state = app.invoke(state)
+        logger.debug(
+            "round %d: post-status=%r missing_fields=%r risk_flags=%r",
+            round_num, state.get("status"), state.get("missing_fields"), state.get("risk_flags"),
+        )
 
         if state["status"] == "complete":
+            logger.debug("round %d: complete, returning final_application", round_num)
             return state["final_application"]
 
         if state["status"] == "awaiting_info":
             try:
                 reply = next(followup_iter)
             except StopIteration:
+                logger.debug("round %d: no more scripted follow-ups", round_num)
                 print("⚠️  No more scripted follow-ups; stopping scenario.")
                 return state["final_application"]
             print(f"Applicant: {reply}\n")
             state["messages"].append(HumanMessage(content=reply))
             state["pending_user_reply"] = True
 
+    logger.debug("hit max_rounds=%d without completing intake", max_rounds)
     print("⚠️  Hit max rounds without completing intake.")
     return state["final_application"]
 

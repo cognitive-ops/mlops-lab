@@ -42,7 +42,8 @@ def build_graph() -> StateGraph:
     """Construct and return the uncompiled intake StateGraph."""
 
     workflow = StateGraph(IntakeState)
-
+    print(
+        f"🧩 Building insurance intake graph with {len(workflow.nodes)} nodes and {len(workflow.edges)} edges...")
     # ── Nodes ──────────────────────────────────────────────────────────────
     workflow.add_node("supervisor", supervisor_node)
     workflow.add_node("extractor", extractor_node)
