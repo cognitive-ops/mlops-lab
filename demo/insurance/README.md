@@ -182,7 +182,7 @@ This is the architecture the pipeline implements:
 
 | Diagram box | Implementation | Notes |
 |---|---|---|
-| Input Data Ingestion (App/PDF/Voice) | `fnol_main.run_preflight()` → `fnol_tools.extract_pdf_text` (real, via `pypdf`) / `fnol_tools.transcribe_voice` (real, OpenAI Whisper) | Runs **before** a graph thread is even created |
+| Input Data Ingestion (App/PDF/Voice) | `fnol_main.run_preflight()` → `fnol_tools.extract_pdf_text` (real, via `pypdf`, OCR fallback via `pdf2image`+`pytesseract` for scanned/image-only PDFs) / `fnol_tools.transcribe_voice` (real, OpenAI Whisper) | Runs **before** a graph thread is even created |
 | Deterministic Rail | `fnol_guardrails.run_deterministic_rail()` | Rule-based: prompt-injection patterns, SSN/card-number redaction, length checks. Swap point for real NeMo Guardrails / Guardrails AI |
 | Ingest Node | `fnol_agents/ingest.py` | Inside the graph, this is just the state-machine kickoff — all real extraction already happened in the pre-flight step |
 | Verify Policy (Guidewire API) | `fnol_agents/verify_policy.py` → `fnol_tools.verify_policy()` (mock PolicyCenter) | Split into two stages (see below) rather than one box |
@@ -279,7 +279,7 @@ python fnol_main.py --claim --channel app --text "..." --photo damage.jpg --clai
 | `fnol_guardrails.py` | Deterministic Rail — rule-based input sanitizer (pre-graph) |
 | `fnol_tools.py` | Mock Guidewire policy DB, PDF/voice/photo ingestion helpers, risk scoring, CMS submission, adjuster/SIU assignment |
 | `fnol_agents/ingest.py` | State-machine kickoff — appends the pre-processed text as a `HumanMessage` |
-| `fnol_agents/extractor.py` | Extracts claim fields from the latest message |
+| `fnol_agents/extractor.py` | Extracts claim fields from the latest message; for the `pdf` channel, classifies document type (claim form / police report / medical bill / repair estimate / other) and attaches a confidence score + low-confidence field list |
 | `fnol_agents/validate_stage_a.py` | Checks policy-identifying fields before policy lookup |
 | `fnol_agents/verify_policy.py` | Guidewire-style policy identity/status lookup |
 | `fnol_agents/validate_stage_b.py` | Checks full loss-detail fields after policy verification |
@@ -311,6 +311,14 @@ same `claim_id`.
   `awaiting_human_review` branch with a call into your claims queue /
   review dashboard; the mechanics (`update_state` + `invoke(None, config)`)
   stay the same regardless of where the decision comes from.
+- **Document processing**: `fnol_agents/extractor.py` classifies PDF
+  submissions into `DocumentType` (`fnol_schema.py`) and scores extraction
+  confidence — add new document types / fields there. `low_confidence_fields`
+  and `extraction_confidence` land in `FNOLState` but nothing currently acts
+  on them; wiring them into `validate_stage_a`/`validate_stage_b` (e.g. treat
+  a low-confidence required field as still missing) would push uncertain
+  OCR reads back to the claimant for confirmation instead of silently
+  trusting them.
 - **Real Deterministic Rail**: `fnol_guardrails.run_deterministic_rail()` is
   the only place the rail logic lives — swap it for a real NeMo Guardrails
   or Guardrails AI call without touching anything else.

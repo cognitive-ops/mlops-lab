@@ -119,13 +119,39 @@ def check_loss_coverage(policy_number: str, loss_type: str, date_of_loss: str) -
 # Multi-modal ingestion: PDF / voice / photo
 # ---------------------------------------------------------------------------
 def extract_pdf_text(pdf_path: str) -> str:
-    """Real PDF text extraction via pypdf. Used for scanned/typed claim
-    forms submitted as PDF attachments."""
+    """PDF text extraction for claim forms/police reports/medical bills
+    submitted as PDF attachments.
+
+    Tries the embedded text layer first (pypdf, fast/exact for typed PDFs).
+    Falls back to OCR when that yields ~nothing — i.e. the PDF is a scan or
+    photo of a paper form with no text layer at all."""
 
     from pypdf import PdfReader
 
     reader = PdfReader(pdf_path)
     pages = [page.extract_text() or "" for page in reader.pages]
+    text = "\n".join(pages).strip()
+
+    if len(text) < 20:
+        text = _ocr_pdf_text(pdf_path)
+
+    return text
+
+
+def _ocr_pdf_text(pdf_path: str) -> str:
+    """OCR fallback for scanned/image-only PDFs (no embedded text layer).
+
+    Requires poppler (for pdf2image) and a tesseract install on PATH; set
+    TESSERACT_CMD in the environment if tesseract isn't on PATH."""
+
+    import pytesseract
+    from pdf2image import convert_from_path
+
+    if os.getenv("TESSERACT_CMD"):
+        pytesseract.pytesseract.tesseract_cmd = os.getenv("TESSERACT_CMD")
+
+    images = convert_from_path(pdf_path)
+    pages = [pytesseract.image_to_string(image) for image in images]
     return "\n".join(pages).strip()
 
 

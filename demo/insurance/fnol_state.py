@@ -22,6 +22,14 @@ class FNOLState(TypedDict):
             (a claimant can file by phone and still attach a photo later).
         ingested: Whether the ingest node has normalized raw_input for this turn.
         claim_data: Fields collected so far, merged across turns.
+        document_type: Classification of the submitted PDF (claim_form,
+            police_report, medical_bill, repair_estimate, other), or "" if
+            the latest turn wasn't a PDF submission.
+        extraction_confidence: Extractor's confidence in the latest PDF
+            extraction, in [0, 1]. 1.0 for non-document (chat/voice) turns.
+        low_confidence_fields: Field names from the latest PDF extraction
+            the extractor flagged as unreliable (e.g. garbled OCR) — worth
+            confirming with the claimant rather than trusting outright.
         missing_fields: Required fields (current stage) still absent or invalid.
         validated_stage_a: Whether policy-identifying fields (policy_number,
             claimant_name) have been checked since the last extraction.
@@ -57,6 +65,9 @@ class FNOLState(TypedDict):
     photo_path: str
     ingested: bool
     claim_data: dict
+    document_type: str
+    extraction_confidence: float
+    low_confidence_fields: List[str]
     missing_fields: List[str]
     validated_stage_a: bool
     validated_stage_b: bool
