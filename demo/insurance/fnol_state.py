@@ -40,6 +40,11 @@ class FNOLState(TypedDict):
         coverage_context: Raw result from the mock Guidewire policy lookup.
         damage_analyzed: Whether the multi-modal damage node has run.
         damage_analysis: Result of photo analysis (or a "no photo" stand-in).
+        triage_completed: Whether the claims-triage node has run for the
+            current data.
+        claim_complexity: "simple" | "standard" | "complex", from triage.
+        claim_priority: "low" | "normal" | "high", from triage.
+        claims_queue: "self_service" | "adjuster" | "specialist_adjuster".
         risk_assessed: Whether the fraud/risk node has run for the current data.
         risk_flags: Fraud/severity risk flags raised by the risk node.
         risk_score: Numeric fraud/severity risk score in [0, 1].
@@ -55,6 +60,12 @@ class FNOLState(TypedDict):
         status: "collecting" | "awaiting_info" | "awaiting_human_review" | "complete".
         cms_claim_id: The ID returned by the mock Core CMS (Guidewire/Duck Creek)
             submission, once the claim reaches a terminal decision.
+        deductible_applied: Deductible subtracted from the claimed amount by
+            the finance-settlement node (approved claims only).
+        reserve_amount: Reserve set aside for the claim by finance settlement.
+        settlement_amount: Net payout amount computed by finance settlement.
+        payment_id: ID returned by the mock payment-rail disbursement, once
+            an approved claim has been settled.
         final_claim: The finished, structured claim record (once complete).
         iterations: Safety counter to prevent infinite loops.
     """
@@ -76,6 +87,10 @@ class FNOLState(TypedDict):
     coverage_context: dict
     damage_analyzed: bool
     damage_analysis: dict
+    triage_completed: bool
+    claim_complexity: str
+    claim_priority: str
+    claims_queue: str
     risk_assessed: bool
     risk_flags: List[str]
     risk_score: float
@@ -87,5 +102,9 @@ class FNOLState(TypedDict):
     next_agent: str
     status: str
     cms_claim_id: str
+    deductible_applied: float
+    reserve_amount: float
+    settlement_amount: float
+    payment_id: str
     final_claim: dict
     iterations: int

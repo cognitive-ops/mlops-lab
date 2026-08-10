@@ -270,6 +270,61 @@ def compute_risk_score(claim_data: dict, coverage_context: dict, damage_analysis
 
 
 # ---------------------------------------------------------------------------
+# Claims triage
+# ---------------------------------------------------------------------------
+def triage_claim(claim_data: dict, damage_analysis: dict, coverage_context: dict) -> dict:
+    """Mock Claims Triage — complexity/priority/queue classification.
+
+    Real deployment: replace with a claims-complexity model / business rules
+    engine (line of business, severity, injury flag, litigation risk).
+    """
+
+    amount = claim_data.get("estimated_damage_amount") or 0
+    severity = damage_analysis.get("severity_estimate", "unknown")
+    injuries = bool(claim_data.get("injuries_reported"))
+    prior_claims = coverage_context.get("prior_claims_count", 0)
+
+    if injuries or severity == "severe" or amount > 20000:
+        complexity, priority, queue = "complex", "high", "specialist_adjuster"
+    elif severity == "moderate" or amount > 5000 or prior_claims >= 2:
+        complexity, priority, queue = "standard", "normal", "adjuster"
+    else:
+        complexity, priority, queue = "simple", "low", "self_service"
+
+    return {"complexity": complexity, "priority": priority, "queue": queue}
+
+
+# ---------------------------------------------------------------------------
+# Finance settlement
+# ---------------------------------------------------------------------------
+def calculate_settlement(claim_data: dict, coverage_context: dict) -> dict:
+    """Mock Finance Settlement — reserve + net payout calc.
+
+    Real deployment: replace with the actuarial reserving engine and the
+    policy's actual deductible schedule (flat $500 here is a stand-in).
+    """
+
+    amount = claim_data.get("estimated_damage_amount") or 0
+    deductible = 500.0
+    settlement_amount = max(amount - deductible, 0.0)
+    reserve_amount = round(amount * 1.1, 2)
+
+    return {
+        "deductible": deductible,
+        "settlement_amount": round(settlement_amount, 2),
+        "reserve_amount": reserve_amount,
+    }
+
+
+def disburse_payment(claim_id: str, amount: float) -> str:
+    """Mock payment-rail disbursement. Real deployment: call the payment
+    processor (e.g. ACH/Stripe Treasury) here."""
+
+    idx = abs(hash(f"{claim_id}{amount}")) % 1_000_000
+    return f"PAY-{idx:06d}"
+
+
+# ---------------------------------------------------------------------------
 # Core CMS submission + human assignment
 # ---------------------------------------------------------------------------
 def assign_adjuster(claim_id: str) -> str:

@@ -80,6 +80,7 @@ def assign_or_deny_node(state: FNOLState) -> dict:
         "missing_fields": ["additional_details_requested_by_reviewer"],
         "status": "awaiting_info",
         "damage_analyzed": False,
+        "triage_completed": False,
         "risk_assessed": False,
         "route_decision": "",
         "human_decision": "",

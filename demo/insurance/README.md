@@ -155,6 +155,10 @@ This is the architecture the pipeline implements:
 │                    │                          Multi-Modal          │
 │                    │                          Damage Node          │
 │                    │                                  │            │
+│                    │                          Claims Triage Agent   │
+│                    │                          (complexity/priority/ │
+│                    │                           queue classification)│
+│                    │                                  │            │
 │                    │                          Fraud & Risk          │
 │                    │                          Evaluation Node       │
 │                    │                                  │            │
@@ -171,11 +175,22 @@ This is the architecture the pipeline implements:
                       │           │ Approve  │      │ Interrupt  │ │ (SIU Escalation)  │
                       │           └────┬─────┘      └─────┬──────┘ └────────┬──────────┘
                       │                │                  └────────┬────────┘
-                      │                │                           │
+                      │                │                (needs_more_info loops back;
+                      │                │                 approved/rejected fall through ▼)
                       │                ▼                           ▼
                       │       ┌──────────────────────────────────────────┐
-                      └──────►│      Core CMS (Guidewire / Duck Creek)   │
-                              └──────────────────────────────────────────┘
+                      └──────►│      Core CMS (Guidewire / Duck Creek)   │  (every terminal
+                              └────────────────────┬─────────────────────┘   decision is
+                                                    │ (approved only —          logged here)
+                                                    │  rejected ends here)
+                                                    ▼
+                                       ┌────────────────────────────┐
+                                       │  Finance Settlement Agent  │
+                                       │ (reserve/payout calc +     │
+                                       │  payment disbursement)     │
+                                       └─────────────┬──────────────┘
+                                                      ▼
+                                                     END
 ```
 
 ### How the implementation maps to it — and where it deliberately differs
@@ -188,11 +203,13 @@ This is the architecture the pipeline implements:
 | Verify Policy (Guidewire API) | `fnol_agents/verify_policy.py` → `fnol_tools.verify_policy()` (mock PolicyCenter) | Split into two stages (see below) rather than one box |
 | Missing Fields? / Disambiguate | `fnol_agents/validate_stage_a.py` + `validate_stage_b.py` + `fnol_agents/disambiguate.py` | **Two validation stages, not one.** Policy-identifying fields (policy #, name) are checked *before* Verify Policy runs — you can't look up a policy you don't have a number for. Full loss-detail fields are checked *after*, feeding a second Disambiguate pass if needed |
 | Multi-Modal Damage Node | `fnol_agents/damage_analysis.py` → `fnol_tools.analyze_damage_photo()` (real, OpenAI vision) | Runs if a `photo_path` was attached; otherwise proceeds with a neutral placeholder |
+| Claims Triage Agent | `fnol_agents/claims_triage.py` → `fnol_tools.triage_claim()` | Classifies `claim_complexity` / `claim_priority` / `claims_queue` from amount, damage severity, injuries, and prior-claims history — sibling stage to Fraud & Risk, runs right before it |
 | Fraud & Risk Evaluation Node | `fnol_agents/fraud_risk.py` → `fnol_tools.compute_risk_score()` | Also runs the full loss-coverage check (`check_loss_coverage`) here, now that loss_type/date are known, and **decides the routing outcome itself** (see thresholds below) |
 | Conditional Routing | `route_after_risk()` in `fnol_graph.py`, reading `route_decision` set by fraud_risk_node | risk < 0.3 & in-coverage & ≤ $10k → `fast_track`; 0.3 ≤ risk < 0.6 → `hitl_ambiguous`; risk ≥ 0.6, amount > $10k, or coverage not in force → `adjuster_review` (SIU-flagged only when the *risk score itself*, not just claim value, crossed 0.6) |
 | Fast Track Auto-Approve | `fnol_agents/fast_track_approve.py` | The **only** auto-approval path in the pipeline |
 | Human in the Loop Interrupt / Human Adjuster Review Gate | `fnol_agents/await_human_review.py` + `fnol_agents/assign_or_deny.py`, gated by `interrupt_before=["assign_or_deny"]` | Both diagram gates share one implementation — same mandatory-human mechanics, differentiated by `route_decision`/`siu_escalated` in the printed summary and in `final_claim` |
-| Core CMS (Guidewire / Duck Creek) | `fnol_tools.submit_to_cms()` | Mock — returns a generated claim ID; both `fast_track_approve` and `assign_or_deny` call it on a terminal decision |
+| Core CMS (Guidewire / Duck Creek) | `fnol_tools.submit_to_cms()` | Mock — returns a generated claim ID; both `fast_track_approve` and `assign_or_deny` call it on every terminal decision (approved, rejected, or auto-approved) |
+| Finance Settlement Agent | `fnol_agents/finance_settlement.py` → `fnol_tools.calculate_settlement()` + `fnol_tools.disburse_payment()` | Reserve/payout calc (flat $500 mock deductible) + mock payment-rail disbursement; only reached on an **approved** decision (fast-track or human-approved) — a rejected claim ends at Core CMS with no settlement step |
 
 ### Actual graph wiring
 
@@ -211,6 +228,7 @@ flowchart TD
     supervisor -->|not validated_stage_b| validate_b[Validate stage B]
     supervisor -->|stage B missing| disambiguate
     supervisor -->|not damage_analyzed| damage[Damage Analysis]
+    supervisor -->|not triage_completed| triage[Claims Triage]
     supervisor -->|not risk_assessed| fraud_risk[Fraud & Risk]
     supervisor -->|else| assign_or_deny[["Assign / Deny\n(interrupt_before)"]]
 
@@ -220,6 +238,7 @@ flowchart TD
     verify_policy --> supervisor
     validate_b --> supervisor
     damage --> supervisor
+    triage --> supervisor
     await_review --> supervisor
 
     disambiguate --> pause([END\nawaiting_info])
@@ -227,13 +246,17 @@ flowchart TD
     fraud_risk -->|route_decision == fast_track| fast_track[Fast Track Approve]
     fraud_risk -->|hitl_ambiguous / adjuster_review| await_review[Await Human Review]
 
-    fast_track --> doneEnd1([END\ncomplete])
+    fast_track --> settle[Finance Settlement]
 
     assign_or_deny -->|needs_more_info| supervisor
-    assign_or_deny -->|approved / rejected| doneEnd2([END\ncomplete])
+    assign_or_deny -->|approved| settle
+    assign_or_deny -->|rejected| doneEnd2([END\ncomplete])
+
+    settle --> doneEnd1([END\ncomplete])
 
     style assign_or_deny fill:#7f1d1d,stroke:#f87171,color:#fff
     style fast_track fill:#14532d,stroke:#4ade80,color:#fff
+    style settle fill:#1e3a8a,stroke:#60a5fa,color:#fff
 ```
 
 Two things worth calling out that aren't obvious from the box shapes:
@@ -245,6 +268,10 @@ Two things worth calling out that aren't obvious from the box shapes:
   itself and its outgoing edge (`route_after_risk`) just acts on it
   directly — the supervisor is never consulted on the one decision that
   actually matters.
+- **`finance_settlement` only runs on an approved decision.** Both
+  `fast_track_approve` and the approved branch of `assign_or_deny` route to
+  it; the rejected branch of `assign_or_deny` goes straight to `END` — a
+  denied claim has nothing to settle.
 
 ### Quick Start
 
@@ -277,7 +304,7 @@ python fnol_main.py --claim --channel app --text "..." --photo damage.jpg --clai
 | `fnol_state.py` | Shared `FNOLState` TypedDict used by every node |
 | `fnol_schema.py` | `ClaimExtraction` schema, `STAGE_A_FIELDS`/`STAGE_B_FIELDS`, follow-up prompts |
 | `fnol_guardrails.py` | Deterministic Rail — rule-based input sanitizer (pre-graph) |
-| `fnol_tools.py` | Mock Guidewire policy DB, PDF/voice/photo ingestion helpers, risk scoring, CMS submission, adjuster/SIU assignment |
+| `fnol_tools.py` | Mock Guidewire policy DB, PDF/voice/photo ingestion helpers, risk scoring, claims triage classification, settlement calc + payment disbursement, CMS submission, adjuster/SIU assignment |
 | `fnol_agents/ingest.py` | State-machine kickoff — appends the pre-processed text as a `HumanMessage` |
 | `fnol_agents/extractor.py` | Extracts claim fields from the latest message; for the `pdf` channel, classifies document type (claim form / police report / medical bill / repair estimate / other) and attaches a confidence score + low-confidence field list |
 | `fnol_agents/validate_stage_a.py` | Checks policy-identifying fields before policy lookup |
@@ -285,10 +312,12 @@ python fnol_main.py --claim --channel app --text "..." --photo damage.jpg --clai
 | `fnol_agents/validate_stage_b.py` | Checks full loss-detail fields after policy verification |
 | `fnol_agents/disambiguate.py` | Follow-up question for either validation stage; pauses the turn |
 | `fnol_agents/damage_analysis.py` | Multi-modal damage-photo analysis (OpenAI vision) |
+| `fnol_agents/claims_triage.py` | Classifies claim complexity/priority/handling queue |
 | `fnol_agents/fraud_risk.py` | Full coverage check + fraud/severity scoring + routing decision |
 | `fnol_agents/fast_track_approve.py` | Auto-approval path (only reachable for risk < 0.3) |
 | `fnol_agents/await_human_review.py` | Flags the claim for mandatory review (pairs with `interrupt_before`) |
-| `fnol_agents/assign_or_deny.py` | Acts on the human reviewer's decision — the only other terminal node |
+| `fnol_agents/assign_or_deny.py` | Acts on the human reviewer's decision — approved/rejected are terminal (rejected ends immediately; approved continues to settlement) |
+| `fnol_agents/finance_settlement.py` | Reserve/payout calc + payment disbursement for any approved claim |
 | `fnol_supervisor.py` | Deterministic router for the sequential collection/verification stages |
 | `fnol_graph.py` | LangGraph `StateGraph` wiring + risk-based conditional edge + HITL gate |
 | `fnol_main.py` | Pre-flight (ingestion + rail), SQLite checkpointer, scripted scenarios, `--interactive` and `--claim` (real file) modes |

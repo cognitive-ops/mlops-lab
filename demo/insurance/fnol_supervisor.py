@@ -2,12 +2,12 @@
 Supervisor – routes the FNOL intake pipeline to the next node.
 
 Deterministic rule router, not an LLM: ingestion, validation, policy
-verification, and damage/risk scoring are fixed, unambiguous stages. The
-one point of real judgment — the risk-based approve/deny/escalate decision
-— is made once, deterministically, by fraud_risk_node itself (via
-route_decision), and the actual approve/deny call for anything above
-fast-track is handed to a human at the HITL gate. The supervisor never
-makes that call.
+verification, damage analysis, claims triage, and risk scoring are fixed,
+unambiguous stages. The one point of real judgment — the risk-based
+approve/deny/escalate decision — is made once, deterministically, by
+fraud_risk_node itself (via route_decision), and the actual approve/deny
+call for anything above fast-track is handed to a human at the HITL gate.
+The supervisor never makes that call.
 """
 
 from fnol_state import FNOLState
@@ -32,6 +32,8 @@ def supervisor_node(state: FNOLState) -> dict:
         next_agent = "disambiguate"
     elif not state.get("damage_analyzed", False):
         next_agent = "damage_analysis"
+    elif not state.get("triage_completed", False):
+        next_agent = "claims_triage"
     elif not state.get("risk_assessed", False):
         next_agent = "fraud_risk"
     else:
