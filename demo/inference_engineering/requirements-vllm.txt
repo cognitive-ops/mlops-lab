@@ -1,0 +1,2 @@
+# Linux + CUDA only (use WSL2 on Windows). vLLM pins its own torch/transformers.
+vllm
