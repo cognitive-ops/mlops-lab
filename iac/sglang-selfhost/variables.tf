@@ -72,7 +72,7 @@ variable "gpu_vm_size" {
 }
 
 variable "gpu_node_count" {
-  description = "Number of GPU nodes (also max when autoscaling)"
+  description = "Max GPU nodes (autoscaler upper bound)"
   type        = number
   default     = 1
 }
@@ -93,100 +93,6 @@ variable "gpu_os_disk_size_gb" {
   description = "OS disk size for GPU nodes in GB"
   type        = number
   default     = 128
-}
-
-# Model Configuration
-variable "model_name" {
-  description = "Name clients use in the `model` field of API requests (--served-model-name)"
-  type        = string
-  default     = "qwen2.5-7b-instruct"
-}
-
-variable "model_repo" {
-  description = "HuggingFace model repository ID"
-  type        = string
-  default     = "Qwen/Qwen2.5-7B-Instruct"
-}
-
-variable "hf_token" {
-  description = "HuggingFace token (not needed for public Qwen repos). Prefer TF_VAR_hf_token env var."
-  type        = string
-  default     = ""
-  sensitive   = true
-}
-
-variable "model_cache_size_gb" {
-  description = "Persistent disk size for the HuggingFace model cache in GB"
-  type        = number
-  default     = 100
-}
-
-# SGLang
-variable "sglang_image" {
-  description = "SGLang container image (pin a version for reproducibility)"
-  type        = string
-  default     = "lmsysorg/sglang:latest"
-}
-
-variable "sglang_port" {
-  description = "Port for SGLang OpenAI-compatible API"
-  type        = number
-  default     = 30000
-}
-
-variable "sglang_context_length" {
-  description = "Maximum context length for the model"
-  type        = number
-  default     = 8192
-}
-
-variable "sglang_mem_fraction_static" {
-  description = "Fraction of GPU memory reserved for weights + KV cache (0.0 to 1.0)"
-  type        = number
-  default     = 0.9
-}
-
-variable "sglang_tool_call_parser" {
-  description = "Tool-call parser matching the model family (qwen25 for Qwen2.5/Qwen3, llama3, mistral, ...). Empty = disabled."
-  type        = string
-  default     = "qwen25"
-}
-
-variable "sglang_tp_size" {
-  description = "Tensor parallel size. Must equal GPUs per node used (gpus_per_pod)."
-  type        = number
-  default     = 1
-}
-
-variable "sglang_extra_args" {
-  description = "Extra args appended to sglang.launch_server (e.g. [\"--quantization\", \"fp8\"])"
-  type        = list(string)
-  default     = []
-}
-
-variable "gpus_per_pod" {
-  description = "nvidia.com/gpu requested by the SGLang pod"
-  type        = number
-  default     = 1
-}
-
-# Exposure
-variable "k8s_namespace" {
-  description = "Kubernetes namespace for SGLang"
-  type        = string
-  default     = "sglang"
-}
-
-variable "expose_public" {
-  description = "Public Azure Load Balancer (true) or internal-only LB in the VNet (false)"
-  type        = bool
-  default     = true
-}
-
-variable "allowed_cidr_blocks" {
-  description = "CIDR blocks allowed to reach the API (LoadBalancer source ranges)"
-  type        = list(string)
-  default     = ["0.0.0.0/0"] # Restrict for production!
 }
 
 # Monitoring

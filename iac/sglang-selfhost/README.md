@@ -1,113 +1,101 @@
 # SGLang Qwen on AKS (GPU)
 
-Terraform config that deploys a self-hosted Qwen LLM on an Azure Kubernetes Service cluster with a GPU node pool, served by [SGLang](https://github.com/sgl-project/sglang) (OpenAI-compatible API). For a local Docker-only version, see [demo/sglang](../../demo/sglang).
+Self-hosted Qwen LLM on Azure Kubernetes Service with a GPU node pool, served by [SGLang](https://github.com/sgl-project/sglang) (OpenAI-compatible API).
+
+- **Terraform** ([*.tf](.)) creates infra only: resource group, AKS, CPU system pool, GPU node pool, Log Analytics.
+- **Kubernetes YAML** ([k8s/](k8s)) deploys SGLang: namespace, NVIDIA device plugin, PVC, Deployment, Service.
+
+For a local Docker-only version, see [demo/sglang](../../demo/sglang).
 
 ## Architecture
 
-- **AKS cluster**: Azure CNI overlay, system-assigned identity
-- **System node pool**: small CPU pool for cluster add-ons (`CriticalAddonsOnly`)
-- **GPU node pool**: N-series VMs, autoscaled, tainted `sku=gpu:NoSchedule`, optional Spot. AKS Ubuntu images install the NVIDIA driver automatically
-- **NVIDIA device plugin** DaemonSet: exposes `nvidia.com/gpu`
-- **SGLang Deployment**: 1 pod, `nvidia.com/gpu` request, `/dev/shm` memory volume, startup/readiness/liveness probes on `/health`
-- **PVC (managed-csi)**: persistent HuggingFace cache so restarts don't re-download weights
-- **Service type LoadBalancer**: public (or internal) Azure LB on port 80, source-IP restricted
-- **Log Analytics + Container Insights** (optional)
+- AKS, Azure CNI overlay, system-assigned identity
+- System pool (`CriticalAddonsOnly`) for add-ons
+- GPU pool: N-series, autoscaled, tainted `sku=gpu:NoSchedule`, label `workload=llm-inference`, optional Spot. AKS Ubuntu images install the NVIDIA driver automatically
+- `k8s/`: device plugin DaemonSet, SGLang Deployment (1 GPU, probes on `/health`, `/dev/shm`), `managed-csi` PVC for HF cache, LoadBalancer Service on port 80
 
 ## Prerequisites
 
 1. Terraform >= 1.5, Azure CLI (`az login`), `kubectl`
-2. Azure subscription with **GPU vCPU quota** in the chosen region (e.g. `standardNCADSA100v4Family`). Check: `az vm list-usage -l eastus -o table | grep -i NC`
-3. HuggingFace token only if you serve a gated repo (public Qwen repos need none)
+2. **Enabled** Azure subscription with GPU vCPU quota in the region. Check: `az vm list-usage -l eastus -o table | grep -i NC`
+3. HuggingFace token only for gated repos (public Qwen repos need none)
 
-## Choosing a GPU
+## GPU choice
 
-| Model | VRAM need (bf16) | `gpu_vm_size` |
-|-------|------------------|---------------|
+| Model | VRAM (bf16) | `gpu_vm_size` |
+|-------|-------------|---------------|
 | Qwen2.5-3B-Instruct | ~7 GB | `Standard_NC4as_T4_v3` (T4 16GB) |
-| Qwen2.5-7B-Instruct (default) | ~16 GB + KV cache | `Standard_NC24ads_A100_v4` (A100 80GB) or `Standard_NV36ads_A10_v5` (A10 24GB) |
-| Qwen2.5-14B / 32B | 30 / 65 GB | A100 80GB (32B: add `--quantization fp8` or use 2 GPUs: `Standard_NC48ads_A100_v4`, `gpus_per_pod=2`, `sglang_tp_size=2`) |
+| Qwen2.5-7B-Instruct (default) | ~16 GB + KV | `Standard_NC24ads_A100_v4` (A100 80GB) |
+| Qwen2.5-32B | ~65 GB | A100 80GB + `--quantization fp8`, or 2 GPUs (`Standard_NC48ads_A100_v4`, `--tp-size 2`, `nvidia.com/gpu: 2`) |
 
-## Setup
+## 1. Infra (Terraform)
+
+Edit [terraform.tfvars](terraform.tfvars), then:
 
 ```bash
 cd iac/sglang-selfhost
 terraform init
-```
-
-`terraform.tfvars`:
-
-```hcl
-location       = "eastus"
-project_name   = "sglang-qwen"
-owner          = "your-name"
-
-gpu_vm_size    = "Standard_NC24ads_A100_v4"
-gpu_node_count = 1          # autoscaler max
-gpu_node_min_count = 1      # 0 = scale to zero when idle
-
-model_name     = "qwen2.5-7b-instruct"     # name clients send
-model_repo     = "Qwen/Qwen2.5-7B-Instruct"
-sglang_tool_call_parser = "qwen25"
-
-expose_public       = true
-allowed_cidr_blocks = ["203.0.113.4/32"]   # your IP! default is 0.0.0.0/0
-```
-
-```bash
-export TF_VAR_hf_token="hf_xxx"   # optional
 terraform plan -out=tfplan
 terraform apply tfplan
 ```
 
-If the first plan fails because the Kubernetes provider can't reach a not-yet-created cluster:
+## 2. Deploy SGLang (kubectl)
 
 ```bash
-terraform apply -target=azurerm_kubernetes_cluster_node_pool.gpu
-terraform apply
+az aks get-credentials -g sglang-qwen-rg -n sglang-qwen-aks
+
+# Optional, gated repos only
+kubectl create namespace sglang --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n sglang create secret generic hf-token --from-literal=HF_TOKEN=hf_xxx
+
+kubectl apply -k k8s/
+kubectl -n sglang get pods -w
+kubectl -n sglang logs -f deploy/sglang
 ```
 
-First start: node provisioning (~5-10 min) + image pull + model download. Expect 10-20 min until `/health` is green. `apply` does not wait for the rollout.
+First start: GPU node provisioning (~5-10 min) + image pull + model download, expect 10-20 min until ready.
+
+Change model/flags by editing [k8s/deployment.yaml](k8s/deployment.yaml) (`--model-path`, `--served-model-name`, `--context-length`, `--tool-call-parser`, ...) and re-applying. **Before applying**, restrict `loadBalancerSourceRanges` in [k8s/service.yaml](k8s/service.yaml) (default `0.0.0.0/0`).
+
+### T4 profile
+
+Set `gpu_vm_size = "Standard_NC4as_T4_v3"` in tfvars; in `deployment.yaml` use `Qwen/Qwen2.5-3B-Instruct` and uncomment `--dtype half --attention-backend triton` (T4 has no bf16).
 
 ## Using the API
 
 ```bash
-az aks get-credentials -g sglang-qwen-rg -n sglang-qwen-aks
-terraform output api_endpoint
-
-curl http://<ip>/v1/models
-curl http://<ip>/v1/chat/completions \
-  -H "Content-Type: application/json" \
+IP=$(kubectl -n sglang get svc sglang -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+curl http://$IP/v1/models
+curl http://$IP/v1/chat/completions -H "Content-Type: application/json" \
   -d '{"model":"qwen2.5-7b-instruct","messages":[{"role":"user","content":"Hello"}],"max_tokens":100}'
 ```
 
-Without public access: `kubectl -n sglang port-forward svc/sglang 8080:80`.
+No public IP: `kubectl -n sglang port-forward svc/sglang 8080:80`.
 
 ## Operations
 
 ```bash
-kubectl -n sglang get pods -w
-kubectl -n sglang logs -f deploy/sglang
 kubectl describe nodes -l workload=llm-inference | grep -i nvidia.com/gpu
+kubectl -n kube-system get ds nvidia-device-plugin
 kubectl -n sglang rollout restart deploy/sglang
+kubectl -n sglang scale deploy/sglang --replicas=0   # frees GPU; with gpu_node_min_count=0 node scales away
 ```
 
-## Cost notes
+## Cost
 
-GPU node is the cost. A100 (NC24ads_A100_v4) is roughly $3.5-4/hr on-demand; T4 ~$0.5/hr. Levers: `gpu_use_spot = true` (evictable), `gpu_node_min_count = 0` (scale to zero; note: with one replica pinned, the autoscaler only removes the node if you scale the deployment to 0 — `kubectl -n sglang scale deploy/sglang --replicas=0`), smaller model/GPU, or `az aks nodepool stop`-style teardown via `terraform destroy`.
+GPU node is the cost (A100 ~$3.5-4/hr, T4 ~$0.5/hr). Levers: `gpu_use_spot = true`, `gpu_node_min_count = 0` plus scale deployment to 0, smaller model/GPU.
 
 ## Cleanup
 
 ```bash
+kubectl delete -k k8s/
 terraform destroy
 ```
 
-Deletes cluster, node pools, disks (including the model cache) and the resource group.
-
 ## Troubleshooting
 
-- **Pod `Pending`, `0/N nodes ... Insufficient nvidia.com/gpu`**: device plugin not running or GPU node still provisioning. `kubectl -n kube-system get ds nvidia-device-plugin`; check autoscaler events with `kubectl describe pod`.
-- **Node pool create fails `QuotaExceeded` / `SkuNotAvailable`**: request GPU quota or change `location` / `gpu_vm_size`.
-- **Pod `CrashLoopBackOff` with CUDA OOM**: lower `sglang_context_length` or `sglang_mem_fraction_static`, or use a bigger GPU / `--quantization fp8` via `sglang_extra_args`.
-- **T4 errors on bf16/flashinfer**: T4 (Turing) lacks bf16; add `sglang_extra_args = ["--dtype","half","--attention-backend","triton"]`.
-- **Tool calls not parsed**: set `sglang_tool_call_parser` to match the model family (`qwen25` for Qwen2.5/Qwen3).
-- **Pod evicted/restarting at startup**: startup probe allows ~20 min; raise `failure_threshold` in [k8s.tf](k8s.tf) for slow downloads.
+- **Pod `Pending`, `Insufficient nvidia.com/gpu`**: device plugin not running or GPU node still provisioning. `kubectl describe pod`, check autoscaler events.
+- **Node pool `QuotaExceeded` / `SkuNotAvailable`**: request GPU quota or change `location` / `gpu_vm_size`.
+- **CUDA OOM**: lower `--context-length` / `--mem-fraction-static`, bigger GPU, or `--quantization fp8`.
+- **Tool calls not parsed**: match `--tool-call-parser` to model family (`qwen25` for Qwen2.5/Qwen3).
+- **Slow download, pod restarts**: raise `startupProbe.failureThreshold` in `deployment.yaml`.

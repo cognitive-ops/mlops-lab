@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sglang
+  namespace: sglang
+  labels:
+    app: sglang
+spec:
+  replicas: 1
+  # RWO disk + single GPU: old pod must release both before the new one starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: sglang
+  template:
+    metadata:
+      labels:
+        app: sglang
+    spec:
+      nodeSelector:
+        workload: llm-inference
+      tolerations:
+        - key: sku
+          operator: Equal
+          value: gpu
+          effect: NoSchedule
+        - key: kubernetes.azure.com/scalesetpriority
+          operator: Equal
+          value: spot
+          effect: NoSchedule
+      containers:
+        - name: sglang
+          image: lmsysorg/sglang:latest # pin a version for reproducibility
+          imagePullPolicy: IfNotPresent
+          command:
+            - python3
+            - -m
+            - sglang.launch_server
+            - --model-path
+            - Qwen/Qwen2.5-7B-Instruct
+            - --served-model-name
+            - qwen2.5-7b-instruct
+            - --host
+            - 0.0.0.0
+            - --port
+            - "30000"
+            - --context-length
+            - "8192"
+            - --mem-fraction-static
+            - "0.9"
+            - --tp-size
+            - "1"
+            - --tool-call-parser
+            - qwen25
+            # T4 (no bf16) only: uncomment
+            # - --dtype
+            # - half
+            # - --attention-backend
+            # - triton
+          ports:
+            - name: http
+              containerPort: 30000
+          env:
+            - name: HF_HOME
+              value: /root/.cache/huggingface
+            # Optional: only for gated repos.
+            # kubectl -n sglang create secret generic hf-token --from-literal=HF_TOKEN=hf_xxx
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: HF_TOKEN
+                  optional: true
+          resources:
+            requests:
+              nvidia.com/gpu: "1"
+            limits:
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: model-cache
+              mountPath: /root/.cache/huggingface
+            - name: dshm
+              mountPath: /dev/shm
+          # Model download + load can take 10+ min on first start (~20 min budget).
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 30000
+            periodSeconds: 15
+            failureThreshold: 80
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 30000
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 30000
+            periodSeconds: 30
+            failureThreshold: 5
+            timeoutSeconds: 10
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: model-cache
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Gi

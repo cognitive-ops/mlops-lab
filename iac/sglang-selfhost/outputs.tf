@@ -18,47 +18,12 @@ output "gpu_vm_size" {
   value       = var.gpu_vm_size
 }
 
-output "load_balancer_ip" {
-  description = "IP of the SGLang LoadBalancer service (public or internal per expose_public)"
-  value       = try(kubernetes_service_v1.sglang.status[0].load_balancer[0].ingress[0].ip, null)
-}
-
-output "api_endpoint" {
-  description = "SGLang OpenAI-compatible API base URL"
-  value       = try("http://${kubernetes_service_v1.sglang.status[0].load_balancer[0].ingress[0].ip}/v1", null)
-}
-
-output "model_name" {
-  description = "Model name to use in API requests"
-  value       = var.model_name
-}
-
-output "model_repo" {
-  description = "HuggingFace model repository"
-  value       = var.model_repo
-}
-
-output "quick_start_guide" {
-  description = "Quick start guide"
+output "next_steps" {
+  description = "Deploy SGLang with the manifests in ./k8s"
   value       = <<-EOT
 
-    1. Configure kubectl:
-       az aks get-credentials -g ${azurerm_resource_group.main.name} -n ${azurerm_kubernetes_cluster.main.name}
-
-    2. Watch pod (first start downloads model, 10-20 min):
-       kubectl -n ${var.k8s_namespace} get pods -w
-       kubectl -n ${var.k8s_namespace} logs -f deploy/sglang
-
-    3. Verify GPU is visible:
-       kubectl describe nodes -l workload=llm-inference | grep -i nvidia.com/gpu
-
-    4. Test API:
-       curl http://<load_balancer_ip>/v1/models
-       curl http://<load_balancer_ip>/v1/chat/completions \
-         -H "Content-Type: application/json" \
-         -d '{"model": "${var.model_name}", "messages": [{"role": "user", "content": "Hello!"}], "max_tokens": 100}'
-
-    No public IP / internal LB? Port-forward:
-       kubectl -n ${var.k8s_namespace} port-forward svc/sglang 8080:80
+    1. az aks get-credentials -g ${azurerm_resource_group.main.name} -n ${azurerm_kubernetes_cluster.main.name}
+    2. kubectl apply -k k8s/
+    3. kubectl -n sglang get pods -w
   EOT
 }

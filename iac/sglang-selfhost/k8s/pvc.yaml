@@ -1,0 +1,13 @@
+# Persistent HuggingFace cache so pod restarts don't re-download weights.
+# managed-csi binds on first pod schedule (WaitForFirstConsumer).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache
+  namespace: sglang
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: managed-csi
+  resources:
+    requests:
+      storage: 100Gi
