@@ -1,95 +1,35 @@
-# EC2 Instance ID
-output "instance_id" {
-  description = "EC2 instance ID"
-  value       = aws_instance.llm.id
+output "resource_group_name" {
+  description = "Resource group containing the AKS cluster"
+  value       = azurerm_resource_group.main.name
 }
 
-# EC2 Instance Private IP
-output "instance_private_ip" {
-  description = "EC2 instance private IP address"
-  value       = aws_instance.llm.private_ip
+output "aks_cluster_name" {
+  description = "AKS cluster name"
+  value       = azurerm_kubernetes_cluster.main.name
 }
 
-# Elastic IP
-output "instance_public_ip" {
-  description = "Elastic IP address of the instance"
-  value       = aws_eip.llm.public_ip
+output "get_credentials_command" {
+  description = "Command to configure kubectl"
+  value       = "az aks get-credentials -g ${azurerm_resource_group.main.name} -n ${azurerm_kubernetes_cluster.main.name}"
 }
 
-# SSH Connection Instructions
-output "ssh_command" {
-  description = "Command to SSH into the instance"
-  value       = "ssh -i ~/.ssh/${aws_key_pair.main.key_name}.pem ubuntu@${aws_eip.llm.public_ip}"
+output "gpu_vm_size" {
+  description = "GPU VM size in use"
+  value       = var.gpu_vm_size
 }
 
-# SSH Key Location
-output "ssh_key_path" {
-  description = "Path to the SSH private key"
-  value       = local_file.private_key.filename
+output "load_balancer_ip" {
+  description = "IP of the SGLang LoadBalancer service (public or internal per expose_public)"
+  value       = try(kubernetes_service_v1.sglang.status[0].load_balancer[0].ingress[0].ip, null)
 }
 
-# Load Balancer DNS
-output "load_balancer_dns" {
-  description = "DNS name of the load balancer"
-  value       = var.enable_alb ? aws_lb.main[0].dns_name : null
-}
-
-# Load Balancer URL
 output "api_endpoint" {
-  description = "SGLang API endpoint URL"
-  value       = var.enable_alb ? "http://${aws_lb.main[0].dns_name}" : "http://${aws_eip.llm.public_ip}:${var.sglang_port}"
+  description = "SGLang OpenAI-compatible API base URL"
+  value       = try("http://${kubernetes_service_v1.sglang.status[0].load_balancer[0].ingress[0].ip}/v1", null)
 }
 
-# S3 Bucket Name
-output "s3_bucket_name" {
-  description = "S3 bucket for model artifacts and logs"
-  value       = var.enable_s3_bucket ? aws_s3_bucket.artifacts[0].id : null
-}
-
-# VPC ID
-output "vpc_id" {
-  description = "VPC ID"
-  value       = aws_vpc.main.id
-}
-
-# Subnet ID
-output "subnet_id" {
-  description = "Public subnet ID"
-  value       = aws_subnet.public.id
-}
-
-# CloudWatch Log Group
-output "log_group_name" {
-  description = "CloudWatch log group for SGLang"
-  value       = var.enable_cloudwatch_monitoring ? aws_cloudwatch_log_group.sglang[0].name : null
-}
-
-# Model Storage Volume
-output "model_volume_id" {
-  description = "EBS volume ID for model storage"
-  value       = aws_ebs_volume.model_storage.id
-}
-
-# Security Group IDs
-output "instance_security_group_id" {
-  description = "Security group ID for EC2 instance"
-  value       = aws_security_group.llm_instance.id
-}
-
-output "alb_security_group_id" {
-  description = "Security group ID for load balancer"
-  value       = aws_security_group.alb.id
-}
-
-# Instance Type Used
-output "instance_type" {
-  description = "EC2 instance type"
-  value       = aws_instance.llm.instance_type
-}
-
-# Model Information
 output "model_name" {
-  description = "Model name being served"
+  description = "Model name to use in API requests"
   value       = var.model_name
 }
 
@@ -98,29 +38,27 @@ output "model_repo" {
   value       = var.model_repo
 }
 
-# Quick Access Information
 output "quick_start_guide" {
   description = "Quick start guide"
   value       = <<-EOT
 
-    1. SSH into the instance:
-       ${var.enable_alb ? "ssh -i ~/.ssh/${aws_key_pair.main.key_name}.pem ubuntu@${aws_eip.llm.public_ip}" : ""}
+    1. Configure kubectl:
+       az aks get-credentials -g ${azurerm_resource_group.main.name} -n ${azurerm_kubernetes_cluster.main.name}
 
-    2. Check SGLang status:
-       sudo systemctl status sglang
+    2. Watch pod (first start downloads model, 10-20 min):
+       kubectl -n ${var.k8s_namespace} get pods -w
+       kubectl -n ${var.k8s_namespace} logs -f deploy/sglang
 
-    3. View logs:
-       sudo journalctl -u sglang -f
+    3. Verify GPU is visible:
+       kubectl describe nodes -l workload=llm-inference | grep -i nvidia.com/gpu
 
-    4. Test the API:
-       curl http://${var.enable_alb ? aws_lb.main[0].dns_name : aws_eip.llm.public_ip}${var.enable_alb ? "" : ":${var.sglang_port}"}/v1/models
-
-    5. Make a chat completion request:
-       curl -X POST http://${var.enable_alb ? aws_lb.main[0].dns_name : aws_eip.llm.public_ip}${var.enable_alb ? "" : ":${var.sglang_port}"}/v1/chat/completions \
+    4. Test API:
+       curl http://<load_balancer_ip>/v1/models
+       curl http://<load_balancer_ip>/v1/chat/completions \
          -H "Content-Type: application/json" \
-         -d '{"model": "${var.model_name}", "messages": [{"role": "user", "content": "Hello, world!"}], "max_tokens": 100}'
+         -d '{"model": "${var.model_name}", "messages": [{"role": "user", "content": "Hello!"}], "max_tokens": 100}'
 
-    Model Storage: /mnt/models
-    S3 Bucket: ${var.enable_s3_bucket ? aws_s3_bucket.artifacts[0].id : "Not created"}
+    No public IP / internal LB? Port-forward:
+       kubectl -n ${var.k8s_namespace} port-forward svc/sglang 8080:80
   EOT
 }

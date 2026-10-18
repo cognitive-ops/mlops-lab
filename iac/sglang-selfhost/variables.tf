@@ -1,15 +1,21 @@
-# AWS Region
-variable "aws_region" {
-  description = "AWS region for resource deployment"
+# Azure
+variable "subscription_id" {
+  description = "Azure subscription ID (empty = use az CLI / ARM_SUBSCRIPTION_ID default)"
   type        = string
-  default     = "us-east-1"
+  default     = ""
+}
+
+variable "location" {
+  description = "Azure region. Must have GPU VM quota for gpu_vm_size (check: az vm list-usage -l <region>)"
+  type        = string
+  default     = "eastus"
 }
 
 # Project Configuration
 variable "project_name" {
-  description = "Name of the project"
+  description = "Name prefix for resources"
   type        = string
-  default     = "sglang-server"
+  default     = "sglang-qwen"
 }
 
 variable "environment" {
@@ -28,82 +34,100 @@ variable "owner" {
   default     = "ai-team"
 }
 
-# Networking
-variable "vpc_cidr" {
-  description = "CIDR block for VPC"
-  type        = string
-  default     = "10.0.0.0/16"
+variable "tags" {
+  description = "Additional tags to apply to resources"
+  type        = map(string)
+  default     = {}
 }
 
-variable "subnet_cidr" {
-  description = "CIDR block for public subnet"
+# AKS cluster
+variable "kubernetes_version" {
+  description = "AKS Kubernetes version (null = AKS default)"
   type        = string
-  default     = "10.0.1.0/24"
+  default     = null
 }
 
-variable "enabled_nat_gateway" {
-  description = "Enable NAT Gateway for private subnets"
+variable "system_node_vm_size" {
+  description = "VM size for the CPU system node pool"
+  type        = string
+  default     = "Standard_D4s_v5"
+}
+
+variable "system_node_count" {
+  description = "Node count for the system pool"
+  type        = number
+  default     = 1
+}
+
+# GPU node pool
+variable "gpu_vm_size" {
+  description = "GPU VM size. Qwen2.5-7B bf16 (~15GB) needs >=24GB VRAM: Standard_NC24ads_A100_v4 (A100 80GB), Standard_NV36ads_A10_v5 (A10 24GB). Standard_NC4as_T4_v3 (T4 16GB) only fits <=3B models or quantized."
+  type        = string
+  default     = "Standard_NC24ads_A100_v4"
+
+  validation {
+    condition     = can(regex("^Standard_N[CDV]", var.gpu_vm_size))
+    error_message = "gpu_vm_size must be an Azure N-series GPU VM (NC/ND/NV)."
+  }
+}
+
+variable "gpu_node_count" {
+  description = "Number of GPU nodes (also max when autoscaling)"
+  type        = number
+  default     = 1
+}
+
+variable "gpu_node_min_count" {
+  description = "Min GPU nodes. 0 allows scale-to-zero when idle (cold start = node provisioning + model load)."
+  type        = number
+  default     = 1
+}
+
+variable "gpu_use_spot" {
+  description = "Use Spot GPU nodes (cheap, can be evicted)"
   type        = bool
   default     = false
 }
 
-# EC2 Instance Configuration
-variable "instance_type" {
-  description = "EC2 instance type (GPU instances recommended: g5.xlarge, g4dn.xlarge, p4d.24xlarge)"
-  type        = string
-  default     = "g5.xlarge" # 1x NVIDIA A10G GPU (24GB) — fits Llama-3.1-8B comfortably
-
-  validation {
-    condition     = can(regex("^(g4dn|p3|p4d|g5|g6)\\.", var.instance_type))
-    error_message = "Instance type must be a GPU instance (g4dn, p3, p4d, g5, g6 family)."
-  }
-}
-
-variable "ami_id" {
-  description = "AMI ID for Ubuntu 22.04 LTS (update per region). Use Ubuntu for NVIDIA driver support."
-  type        = string
-  default     = "" # User must provide their regional AMI
-}
-
-variable "root_volume_size" {
-  description = "Root volume size in GB"
+variable "gpu_os_disk_size_gb" {
+  description = "OS disk size for GPU nodes in GB"
   type        = number
-  default     = 100
-}
-
-variable "model_volume_size" {
-  description = "Additional EBS volume size for model storage in GB"
-  type        = number
-  default     = 200
+  default     = 128
 }
 
 # Model Configuration
 variable "model_name" {
-  description = "Name of the model to self-host (e.g., llama-3.1-8b, qwen2.5-7b)"
+  description = "Name clients use in the `model` field of API requests (--served-model-name)"
   type        = string
-  default     = "llama-3.1-8b-instruct"
+  default     = "qwen2.5-7b-instruct"
 }
 
 variable "model_repo" {
   description = "HuggingFace model repository ID"
   type        = string
-  default     = "meta-llama/Llama-3.1-8B-Instruct"
-}
-
-variable "model_size_gb" {
-  description = "Approximate model size in GB"
-  type        = number
-  default     = 16
+  default     = "Qwen/Qwen2.5-7B-Instruct"
 }
 
 variable "hf_token" {
-  description = "HuggingFace token for gated model repos (e.g. meta-llama/*). Prefer passing via TF_VAR_hf_token env var."
+  description = "HuggingFace token (not needed for public Qwen repos). Prefer TF_VAR_hf_token env var."
   type        = string
   default     = ""
   sensitive   = true
 }
 
-# API Configuration
+variable "model_cache_size_gb" {
+  description = "Persistent disk size for the HuggingFace model cache in GB"
+  type        = number
+  default     = 100
+}
+
+# SGLang
+variable "sglang_image" {
+  description = "SGLang container image (pin a version for reproducibility)"
+  type        = string
+  default     = "lmsysorg/sglang:latest"
+}
+
 variable "sglang_port" {
   description = "Port for SGLang OpenAI-compatible API"
   type        = number
@@ -117,102 +141,63 @@ variable "sglang_context_length" {
 }
 
 variable "sglang_mem_fraction_static" {
-  description = "Fraction of GPU memory reserved for KV cache + weights (0.0 to 1.0)"
+  description = "Fraction of GPU memory reserved for weights + KV cache (0.0 to 1.0)"
   type        = number
   default     = 0.9
 }
 
 variable "sglang_tool_call_parser" {
-  description = "Tool-call parser matching the model family (llama3, qwen25, mistral, hermes, deepseekv3, ...) — required for LangChain/LangGraph bind_tools()"
+  description = "Tool-call parser matching the model family (qwen25 for Qwen2.5/Qwen3, llama3, mistral, ...). Empty = disabled."
   type        = string
-  default     = "llama3"
+  default     = "qwen25"
 }
 
-# Load Balancer Configuration
-variable "enable_alb" {
-  description = "Enable Application Load Balancer"
-  type        = bool
-  default     = true
+variable "sglang_tp_size" {
+  description = "Tensor parallel size. Must equal GPUs per node used (gpus_per_pod)."
+  type        = number
+  default     = 1
 }
 
-variable "health_check_path" {
-  description = "Health check endpoint path"
+variable "sglang_extra_args" {
+  description = "Extra args appended to sglang.launch_server (e.g. [\"--quantization\", \"fp8\"])"
+  type        = list(string)
+  default     = []
+}
+
+variable "gpus_per_pod" {
+  description = "nvidia.com/gpu requested by the SGLang pod"
+  type        = number
+  default     = 1
+}
+
+# Exposure
+variable "k8s_namespace" {
+  description = "Kubernetes namespace for SGLang"
   type        = string
-  default     = "/health"
+  default     = "sglang"
 }
 
-variable "health_check_interval" {
-  description = "Health check interval in seconds"
-  type        = number
-  default     = 30
-}
-
-variable "health_check_timeout" {
-  description = "Health check timeout in seconds"
-  type        = number
-  default     = 5
-}
-
-# Security Configuration
-variable "allow_public_access" {
-  description = "Allow public access to the API"
+variable "expose_public" {
+  description = "Public Azure Load Balancer (true) or internal-only LB in the VNet (false)"
   type        = bool
   default     = true
 }
 
 variable "allowed_cidr_blocks" {
-  description = "CIDR blocks allowed to access the API"
+  description = "CIDR blocks allowed to reach the API (LoadBalancer source ranges)"
   type        = list(string)
-  default     = ["0.0.0.0/0"] # Change for production!
+  default     = ["0.0.0.0/0"] # Restrict for production!
 }
 
-variable "allowed_ssh_cidr_blocks" {
-  description = "CIDR blocks allowed for SSH access"
-  type        = list(string)
-  default     = ["0.0.0.0/0"] # Change for production!
-}
-
-# S3 Configuration
-variable "enable_s3_bucket" {
-  description = "Create S3 bucket for model artifacts and logs"
-  type        = bool
-  default     = true
-}
-
-variable "s3_bucket_name" {
-  description = "S3 bucket name (must be globally unique)"
-  type        = string
-  default     = ""
-}
-
-variable "enable_s3_versioning" {
-  description = "Enable versioning for S3 bucket"
-  type        = bool
-  default     = true
-}
-
-variable "enable_s3_encryption" {
-  description = "Enable encryption for S3 bucket"
-  type        = bool
-  default     = true
-}
-
-# Monitoring Configuration
-variable "enable_cloudwatch_monitoring" {
-  description = "Enable CloudWatch monitoring and logging"
+# Monitoring
+variable "enable_monitoring" {
+  description = "Enable Log Analytics + Container Insights"
   type        = bool
   default     = true
 }
 
 variable "log_retention_days" {
-  description = "CloudWatch log retention in days"
+  description = "Log Analytics retention in days"
   type        = number
-  default     = 7
-}
-
-# Tagging
-variable "tags" {
-  description = "Additional tags to apply to resources"
-  type        = map(string)
-  default     = {}
+  default     = 30
 }

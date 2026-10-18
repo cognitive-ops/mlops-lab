@@ -1,44 +1,38 @@
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.5"
 
   required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-    tls = {
-      source  = "hashicorp/tls"
+    azurerm = {
+      source  = "hashicorp/azurerm"
       version = "~> 4.0"
     }
-    local = {
-      source  = "hashicorp/local"
-      version = "~> 2.4"
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.30"
     }
   }
 
   # Uncomment for remote state management
-  # backend "s3" {
-  #   bucket         = "sglang-server-terraform-state"
-  #   key            = "sglang-selfhost/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   encrypt        = true
-  #   dynamodb_table = "sglang-server-terraform-lock"
+  # backend "azurerm" {
+  #   resource_group_name  = "tfstate-rg"
+  #   storage_account_name = "tfstateaccount"
+  #   container_name       = "tfstate"
+  #   key                  = "sglang-aks.tfstate"
   # }
 }
 
-provider "aws" {
-  region = var.aws_region
-
-  default_tags {
-    tags = {
-      Project     = var.project_name
-      Environment = var.environment
-      Owner       = var.owner
-      ManagedBy   = "Terraform"
-      CreatedAt   = timestamp()
-    }
-  }
+provider "azurerm" {
+  features {}
+  subscription_id = var.subscription_id != "" ? var.subscription_id : null
 }
 
-provider "tls" {}
-provider "local" {}
+# Configured from the AKS cluster created in this same config. On a brand-new
+# environment, if plan complains the cluster is unknown, run once:
+#   terraform apply -target=azurerm_kubernetes_cluster_node_pool.gpu
+# then a normal `terraform apply`.
+provider "kubernetes" {
+  host                   = azurerm_kubernetes_cluster.main.kube_config[0].host
+  client_certificate     = base64decode(azurerm_kubernetes_cluster.main.kube_config[0].client_certificate)
+  client_key             = base64decode(azurerm_kubernetes_cluster.main.kube_config[0].client_key)
+  cluster_ca_certificate = base64decode(azurerm_kubernetes_cluster.main.kube_config[0].cluster_ca_certificate)
+}
