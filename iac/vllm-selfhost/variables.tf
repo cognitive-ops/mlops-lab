@@ -250,6 +250,12 @@ variable "vllm_gpu_memory_utilization" {
   default     = 0.9
 }
 
+variable "vllm_enforce_eager" {
+  description = "vLLM --enforce-eager: disable CUDA graphs to save VRAM and startup time at the cost of decode throughput/latency"
+  type        = bool
+  default     = false
+}
+
 variable "vllm_tool_call_parser" {
   description = "vLLM --tool-call-parser for the model family (hermes for Qwen2.5)"
   type        = string

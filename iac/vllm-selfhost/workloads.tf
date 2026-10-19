@@ -77,6 +77,7 @@ resource "helm_release" "llm_serving" {
       maxNumSeqs           = var.vllm_max_num_seqs
       gpuMemoryUtilization = var.vllm_gpu_memory_utilization
       toolCallParser       = var.vllm_tool_call_parser
+      enforceEager         = var.vllm_enforce_eager
       extraArgs            = var.vllm_extra_args
     }
 

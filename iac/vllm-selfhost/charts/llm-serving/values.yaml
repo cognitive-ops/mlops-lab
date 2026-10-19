@@ -17,6 +17,8 @@ model:
   maxNumSeqs: 128
   gpuMemoryUtilization: 0.9
   toolCallParser: hermes
+  # Skip CUDA graph capture: frees its VRAM (~1-3 GB) and speeds startup, but slows decode.
+  enforceEager: false
   extraArgs: []
 
 vllm:

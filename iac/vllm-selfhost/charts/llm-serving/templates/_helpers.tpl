@@ -18,6 +18,9 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 - --gpu-memory-utilization
 - {{ .Values.model.gpuMemoryUtilization | quote }}
 - --enable-prefix-caching
+{{- if .Values.model.enforceEager }}
+- --enforce-eager
+{{- end }}
 - --enable-auto-tool-choice
 - --tool-call-parser
 - {{ .Values.model.toolCallParser | quote }}
