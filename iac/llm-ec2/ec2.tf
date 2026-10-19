@@ -98,7 +98,7 @@ resource "aws_volume_attachment" "model_storage" {
   device_name             = "/dev/sdf"
   volume_id               = aws_ebs_volume.model_storage.id
   instance_id             = aws_instance.llm.id
-  force_detach            = false
+  force_detach            = falsegi
   skip_destroy            = false
 }
 
