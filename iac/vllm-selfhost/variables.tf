@@ -262,6 +262,30 @@ variable "vllm_extra_args" {
   default     = []
 }
 
+variable "lmcache_enabled" {
+  description = "Offload KV cache to CPU RAM with LMCache. Switches vLLM to lmcache_image. Validate fp8 KV compatibility (vllm_kv_cache_dtype) before enabling."
+  type        = bool
+  default     = false
+}
+
+variable "lmcache_image" {
+  description = "vLLM image with LMCache installed (used instead of vllm_image when lmcache_enabled)"
+  type        = string
+  default     = "lmcache/vllm-openai:v0.3.9"
+}
+
+variable "lmcache_cpu_size_gb" {
+  description = "Pinned CPU RAM per vLLM pod for the LMCache KV tier"
+  type        = number
+  default     = 8
+}
+
+variable "lmcache_pod_memory" {
+  description = "vLLM pod memory request while LMCache is enabled (base + lmcache_cpu_size_gb + headroom). Karpenter sizes nodes from it."
+  type        = string
+  default     = "30Gi"
+}
+
 variable "vllm_target_concurrency_per_replica" {
   description = "Autoscaling target: running + waiting requests per replica. Keep well below vllm_max_num_seqs for headroom."
   type        = number

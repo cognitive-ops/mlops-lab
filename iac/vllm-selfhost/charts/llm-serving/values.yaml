@@ -35,6 +35,16 @@ vllm:
   shmSize: 2Gi
   terminationGracePeriodSeconds: 300
 
+# LMCache: offload KV blocks evicted from GPU to pinned CPU RAM and reload on prefix hits.
+# Needs an image with lmcache installed (stock vllm/vllm-openai does not ship it).
+lmcache:
+  enabled: false
+  image: lmcache/vllm-openai:v0.3.9
+  chunkSize: 256
+  cpuSizeGb: 8
+  # Pod memory request while enabled: base request + cpuSizeGb + headroom for pinned buffers.
+  podMemory: 30Gi
+
 router:
   image: lmcache/lmstack-router:v0.1.13
   replicas: 2

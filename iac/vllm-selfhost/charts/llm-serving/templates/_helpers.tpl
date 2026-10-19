@@ -29,6 +29,10 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 - --kv-cache-dtype
 - {{ .Values.model.kvCacheDtype | quote }}
 {{- end }}
+{{- if .Values.lmcache.enabled }}
+- --kv-transfer-config
+- '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'
+{{- end }}
 {{- if eq .Values.model.source "s3" }}
 - --load-format
 - runai_streamer

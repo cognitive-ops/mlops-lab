@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.5"
+  required_version = ">= 1.10" # native S3 state locking (use_lockfile)
 
   required_providers {
     aws = {
@@ -20,14 +20,11 @@ terraform {
     }
   }
 
-  # Strongly recommended for production: remote state with locking.
-  # backend "s3" {
-  #   bucket       = "my-tfstate-bucket"
-  #   key          = "vllm-eks/terraform.tfstate"
-  #   region       = "us-east-1"
-  #   use_lockfile = true
-  #   encrypt      = true
-  # }
+  # Remote state in S3 with native lockfile locking (no DynamoDB). Backend blocks
+  # cannot use variables, so bucket/region come from backend.hcl:
+  #   scripts/bootstrap-state.sh                 # one-off: create the state bucket
+  #   terraform init -backend-config=backend.hcl
+  backend "s3" {}
 }
 
 provider "aws" {

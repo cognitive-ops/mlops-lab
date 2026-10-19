@@ -1,0 +1,7 @@
+# Copy to backend.hcl (git-ignored). Bucket must match scripts/bootstrap-state.sh.
+# Use: terraform init -backend-config=backend.hcl
+bucket       = "my-org-vllm-eks-tfstate"
+key          = "vllm-eks/terraform.tfstate"
+region       = "us-east-1"
+use_lockfile = true # lock is an S3 object next to the state file
+encrypt      = true

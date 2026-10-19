@@ -40,8 +40,12 @@ Model: `Qwen/Qwen2.5-7B-Instruct`, FP8 weights and KV cache, on single-GPU `g6e`
 cd iac/vllm-selfhost
 cp terraform.tfvars.example terraform.tfvars   # edit: domain, CIDRs, capacity
 
+# 0. Remote state: S3 bucket with native lockfile locking (one-off, idempotent)
+STATE_BUCKET=my-org-vllm-eks-tfstate scripts/bootstrap-state.sh
+cp backend.hcl.example backend.hcl              # edit: bucket name must match
+
 # 1. Create the registry first and mirror the vLLM image (avoids Docker Hub rate limits)
-terraform init
+terraform init -backend-config=backend.hcl
 terraform apply -target=aws_ecr_repository.vllm
 bash scripts/mirror-image.sh                    # prints the vllm_image value to put in terraform.tfvars
 

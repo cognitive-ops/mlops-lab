@@ -89,6 +89,13 @@ resource "helm_release" "llm_serving" {
       prometheusServerAddr = "http://kube-prometheus-stack-prometheus.monitoring.svc:9090"
     }
 
+    lmcache = {
+      enabled   = var.lmcache_enabled
+      image     = var.lmcache_image
+      cpuSizeGb = var.lmcache_cpu_size_gb
+      podMemory = var.lmcache_pod_memory
+    }
+
     router = {
       image        = var.router_image
       replicas     = var.router_replicas

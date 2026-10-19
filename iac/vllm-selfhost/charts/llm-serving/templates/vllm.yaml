@@ -43,7 +43,7 @@ spec:
               app: vllm
       containers:
         - name: vllm
-          image: {{ .Values.vllm.image }}
+          image: {{ if .Values.lmcache.enabled }}{{ .Values.lmcache.image }}{{ else }}{{ .Values.vllm.image }}{{ end }}
           imagePullPolicy: IfNotPresent
           command: ["vllm", "serve", {{ .Values.model.path | quote }}]
           args:
@@ -67,9 +67,21 @@ spec:
             - name: HF_HUB_OFFLINE
               value: "1"
             {{- end }}
+            {{- if .Values.lmcache.enabled }}
+            - name: LMCACHE_LOCAL_CPU
+              value: "True"
+            - name: LMCACHE_MAX_LOCAL_CPU_SIZE
+              value: {{ .Values.lmcache.cpuSizeGb | quote }}
+            - name: LMCACHE_CHUNK_SIZE
+              value: {{ .Values.lmcache.chunkSize | quote }}
+            {{- end }}
           resources:
             requests:
-              {{- toYaml .Values.vllm.resources.requests | nindent 14 }}
+              {{- $requests := deepCopy .Values.vllm.resources.requests }}
+              {{- if .Values.lmcache.enabled }}
+              {{- $requests = mergeOverwrite $requests (dict "memory" .Values.lmcache.podMemory) }}
+              {{- end }}
+              {{- toYaml $requests | nindent 14 }}
               nvidia.com/gpu: "1"
             limits:
               nvidia.com/gpu: "1"
