@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  labels:
+    app: litellm
+    {{- include "llm.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    model_list:
+      - model_name: {{ .Values.model.servedName }}
+        litellm_params:
+          model: openai/{{ .Values.model.servedName }}
+          api_base: http://vllm-router:8000/v1
+          api_key: "not-needed"
+          timeout: 600
+          stream_timeout: 60
+
+    litellm_settings:
+      drop_params: true
+      num_retries: 2
+      request_timeout: 600
+      json_logs: true
+      {{- if .Values.litellm.prometheus }}
+      callbacks: ["prometheus"]
+      {{- end }}
+
+    router_settings:
+      routing_strategy: simple-shuffle
+      redis_url: os.environ/REDIS_URL
+      cooldown_time: 15
+      allowed_fails: 5
+
+    general_settings:
+      master_key: os.environ/LITELLM_MASTER_KEY
+      database_url: os.environ/DATABASE_URL
+      # Prisma migrate takes a DB lock, so several replicas can start together.
+      use_prisma_migrate: true
+      max_request_size_mb: {{ .Values.litellm.maxRequestSizeMb }}
+      # Fail open: keep serving already-cached keys if Aurora is briefly unavailable.
+      allow_requests_on_db_unavailable: true

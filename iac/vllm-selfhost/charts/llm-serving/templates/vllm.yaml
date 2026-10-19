@@ -1,0 +1,143 @@
+{{- /* replicas are owned by the KEDA-managed HPA, so they are deliberately not set here. */ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  labels:
+    app: vllm
+    {{- include "llm.labels" . | nindent 4 }}
+spec:
+  # Surge needs a spare GPU for a few minutes (Karpenter adds one) but never reduces capacity.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: vllm
+  template:
+    metadata:
+      labels:
+        app: vllm
+        {{- include "llm.labels" . | nindent 8 }}
+      annotations:
+        # Karpenter must not consolidate a node out from under live streams.
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      serviceAccountName: vllm
+      terminationGracePeriodSeconds: {{ .Values.vllm.terminationGracePeriodSeconds }}
+      nodeSelector:
+        workload: llm-inference
+      tolerations:
+        - key: sku
+          operator: Equal
+          value: gpu
+          effect: NoSchedule
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: vllm
+      containers:
+        - name: vllm
+          image: {{ .Values.vllm.image }}
+          imagePullPolicy: IfNotPresent
+          command: ["vllm", "serve", {{ .Values.model.path | quote }}]
+          args:
+            {{- include "llm.vllmArgs" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: AWS_REGION
+              value: {{ .Values.region | quote }}
+            - name: AWS_DEFAULT_REGION
+              value: {{ .Values.region | quote }}
+            - name: HF_HOME
+              value: /tmp/hf
+            - name: VLLM_NO_USAGE_STATS
+              value: "1"
+            - name: DO_NOT_TRACK
+              value: "1"
+            {{- if eq .Values.model.source "s3" }}
+            # Weights come from S3; never reach out to the Hugging Face Hub at runtime.
+            - name: HF_HUB_OFFLINE
+              value: "1"
+            {{- end }}
+          resources:
+            requests:
+              {{- toYaml .Values.vllm.resources.requests | nindent 14 }}
+              nvidia.com/gpu: "1"
+            limits:
+              nvidia.com/gpu: "1"
+              {{- with .Values.vllm.resources.limits }}
+              {{- toYaml . | nindent 14 }}
+              {{- end }}
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+            - name: tmp
+              mountPath: /tmp
+          lifecycle:
+            preStop:
+              exec:
+                # Give the router time to drop this pod before the server starts draining.
+                command: ["sleep", "20"]
+          # Image pull is outside this budget. Weight streaming, torch.compile, and CUDA graph capture are inside it.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 90
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            failureThreshold: 5
+            timeoutSeconds: 10
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.vllm.shmSize }}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  labels:
+    app: vllm
+    {{- include "llm.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: vllm
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: vllm
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: vllm

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: llm-serving
+description: Production LLM serving stack - vLLM, prefix-aware router, LiteLLM gateway, KEDA autoscaling, monitoring
+type: application
+version: 0.1.0
+appVersion: "0.32.0"

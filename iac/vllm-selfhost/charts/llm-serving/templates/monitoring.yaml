@@ -1,0 +1,136 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vllm
+  labels:
+    {{- include "llm.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: vllm
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vllm-router
+  labels:
+    {{- include "llm.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: vllm-router
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+{{- if .Values.litellm.prometheus }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: litellm
+  labels:
+    {{- include "llm.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: litellm
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+{{- end }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: vllm-alerts
+  labels:
+    {{- include "llm.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: vllm.capacity
+      rules:
+        - alert: VLLMQueueBuildup
+          expr: sum(vllm:num_requests_waiting{namespace="{{ .Release.Namespace }}"}) > 20
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Requests are queuing on vLLM
+            description: More than 20 requests have been waiting for 5 minutes. Check autoscaling and GPU capacity.
+        - alert: VLLMKVCacheSaturated
+          expr: avg(vllm:kv_cache_usage_perc{namespace="{{ .Release.Namespace }}"}) > 0.9
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: vLLM KV cache is almost full
+            description: Mean KV-cache usage above 90% for 10 minutes. Requests may be preempted.
+        - alert: VLLMPreemptions
+          expr: sum(rate(vllm:num_preemptions_total{namespace="{{ .Release.Namespace }}"}[5m])) > 0.1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: vLLM is preempting requests
+            description: KV-cache pressure is forcing recomputation. Add replicas or lower max-num-seqs.
+        - alert: VLLMAtMaxReplicas
+          expr: kube_horizontalpodautoscaler_status_desired_replicas{namespace="{{ .Release.Namespace }}",horizontalpodautoscaler="keda-hpa-vllm"} >= {{ .Values.vllm.maxReplicas }}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: vLLM is at its replica ceiling
+            description: Autoscaling wants more replicas than the configured maximum.
+    - name: vllm.slo
+      rules:
+        - alert: VLLMHighTimeToFirstToken
+          expr: histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{namespace="{{ .Release.Namespace }}"}[5m]))) > 2
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: p95 time to first token above 2s
+            description: The TTFT SLO is being missed.
+        - alert: VLLMReplicasBelowBaseline
+          expr: kube_deployment_status_replicas_available{namespace="{{ .Release.Namespace }}",deployment="vllm"} < {{ .Values.vllm.minReplicas }}
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: Fewer vLLM replicas available than the baseline
+            description: Check GPU quota, Spot/On-Demand capacity, and pod events.
+        - alert: VLLMRouterDown
+          expr: sum(up{namespace="{{ .Release.Namespace }}",service="vllm-router"}) < 1
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: No vLLM router replica is up
+            description: Inference traffic cannot be routed.
+    - name: gpu.health
+      rules:
+        - alert: GPUXidError
+          expr: DCGM_FI_DEV_XID_ERRORS > 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: GPU reported an XID error
+            description: GPU hardware or driver fault on a node. Cordon and replace the node.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vllm-dashboard
+  labels:
+    grafana_dashboard: "1"
+    {{- include "llm.labels" . | nindent 4 }}
+data:
+  vllm.json: |-
+    {{- .Files.Get "dashboards/vllm.json" | nindent 4 }}

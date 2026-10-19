@@ -1,0 +1,100 @@
+{{- /*
+  Everything here is a pre-install/pre-upgrade hook, so `helm install` (and thus
+  terraform apply) blocks until the weights are in S3 and vLLM can start.
+*/ -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: model-sync
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: model-sync-hf
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation
+type: Opaque
+stringData:
+  HF_TOKEN: {{ .Values.hfToken | quote }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: model-sync
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 3300
+  template:
+    spec:
+      serviceAccountName: model-sync
+      restartPolicy: Never
+      containers:
+        - name: sync
+          image: {{ .Values.image }}
+          env:
+            - name: AWS_REGION
+              value: {{ .Values.region | quote }}
+            - name: AWS_DEFAULT_REGION
+              value: {{ .Values.region | quote }}
+            - name: BUCKET
+              value: {{ required "bucket is required" .Values.bucket | quote }}
+            - name: PREFIX
+              value: {{ required "prefix is required" .Values.prefix | quote }}
+            - name: HF_REPO
+              value: {{ required "hfRepo is required" .Values.hfRepo | quote }}
+            - name: HF_REVISION
+              value: {{ .Values.revision | quote }}
+            - name: HF_HUB_ENABLE_HF_TRANSFER
+              value: "1"
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: model-sync-hf
+                  key: HF_TOKEN
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              pip install --no-cache-dir -q "huggingface_hub[hf_transfer]" awscli
+              DEST="s3://${BUCKET}/${PREFIX}"
+              MARKER="${DEST}/.synced-$(echo "${HF_REVISION}" | tr '/' '_')"
+              if aws s3 ls "${MARKER}" >/dev/null 2>&1; then
+                echo "Revision ${HF_REVISION} already mirrored at ${DEST}; nothing to do."
+                exit 0
+              fi
+              python - <<'PY'
+              import os
+              from huggingface_hub import snapshot_download
+
+              snapshot_download(
+                  repo_id=os.environ["HF_REPO"],
+                  revision=os.environ["HF_REVISION"],
+                  local_dir="/work",
+                  allow_patterns=["*.json", "*.safetensors", "*.txt", "*.model", "*.tiktoken"],
+                  token=os.environ.get("HF_TOKEN") or None,
+              )
+              PY
+              aws s3 sync /work "${DEST}" --exclude ".cache/*" --only-show-errors
+              echo "${HF_REPO}@${HF_REVISION}" | aws s3 cp - "${MARKER}"
+              echo "Mirrored ${HF_REPO}@${HF_REVISION} to ${DEST}"
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+              ephemeral-storage: 30Gi
+          volumeMounts:
+            - name: work
+              mountPath: /work
+      volumes:
+        - name: work
+          emptyDir:
+            sizeLimit: {{ .Values.scratchSize }}

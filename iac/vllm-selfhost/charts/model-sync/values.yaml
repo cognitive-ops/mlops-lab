@@ -1,0 +1,11 @@
+region: us-east-1
+bucket: ""
+prefix: ""
+hfRepo: ""
+# Pin a commit hash for reproducibility. Changing it re-syncs.
+revision: main
+hfToken: ""
+
+# Mirror of the official Python image on public ECR (avoids Docker Hub rate limits).
+image: public.ecr.aws/docker/library/python:3.12-slim
+scratchSize: 40Gi

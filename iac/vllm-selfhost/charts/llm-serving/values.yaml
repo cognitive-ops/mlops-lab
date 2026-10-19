@@ -1,0 +1,67 @@
+# Values are normally supplied by Terraform (workloads.tf). Defaults below make
+# the chart renderable on its own with `helm template`.
+region: us-east-1
+vpcCidr: 10.0.0.0/16
+
+# AWS Secrets Manager secret (JSON) synced into the cluster as `litellm-secrets`.
+# Keys: LITELLM_MASTER_KEY, LITELLM_SALT_KEY, DATABASE_URL, REDIS_URL
+secretName: vllm-eks-prod/gateway
+
+model:
+  servedName: qwen2.5-7b-instruct
+  source: s3 # s3 = stream from S3 (Run:ai model streamer), hf = download from Hugging Face
+  path: s3://example-bucket/models/Qwen2.5-7B-Instruct
+  quantization: fp8
+  kvCacheDtype: fp8
+  maxModelLen: 16384
+  maxNumSeqs: 128
+  gpuMemoryUtilization: 0.9
+  toolCallParser: hermes
+  extraArgs: []
+
+vllm:
+  image: vllm/vllm-openai:v0.32.0-cu129
+  minReplicas: 5
+  maxReplicas: 16
+  # Autoscaling targets: (running + waiting) requests per replica, and mean KV-cache usage.
+  targetConcurrency: 64
+  targetKvCacheUsage: 0.75
+  prometheusServerAddr: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
+  # g6e.xlarge: 4 vCPU / 32 GiB. Leave room for DaemonSets.
+  resources:
+    requests:
+      cpu: "3"
+      memory: 20Gi
+  shmSize: 2Gi
+  terminationGracePeriodSeconds: 300
+
+router:
+  image: lmcache/lmstack-router:v0.1.13
+  replicas: 2
+  routingLogic: prefixaware # prefixaware | session | roundrobin
+  sessionKey: x-session-id # used only by routingLogic=session
+  resources:
+    requests:
+      cpu: "1"
+      memory: 1Gi
+    limits:
+      memory: 2Gi
+
+litellm:
+  image: ghcr.io/berriai/litellm:v1.106.0
+  minReplicas: 3
+  maxReplicas: 10
+  workers: 2
+  maxRequestSizeMb: 4
+  # Prometheus metrics callback (check your LiteLLM edition/licence before enabling).
+  prometheus: false
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      memory: 4Gi
+
+edge:
+  # Target group created by Terraform; LiteLLM pods are registered into it.
+  targetGroupArn: ""

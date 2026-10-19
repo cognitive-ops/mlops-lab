@@ -1,46 +1,24 @@
-data "aws_availability_zones" "available" {
-  state = "available"
-}
+module "ebs_csi_pod_identity" {
+  source  = "terraform-aws-modules/eks-pod-identity/aws"
+  version = "~> 1.12"
 
-locals {
-  common_tags = merge({
-    Project     = var.project_name
-    Environment = var.environment
-    Owner       = var.owner
-    ManagedBy   = "Terraform"
-  }, var.tags)
+  name = "${local.name}-ebs-csi"
 
-  cluster_name = "${var.project_name}-${var.environment}"
-  azs          = slice(data.aws_availability_zones.available.names, 0, var.az_count)
-}
+  attach_aws_ebs_csi_policy = true
+  aws_ebs_csi_kms_arns      = [module.eks.kms_key_arn]
 
-module "vpc" {
-  source  = "terraform-aws-modules/vpc/aws"
-  version = "~> 5.16"
-
-  name = local.cluster_name
-  cidr = var.vpc_cidr
-  azs  = local.azs
-
-  private_subnets = [for i in range(var.az_count) : cidrsubnet(var.vpc_cidr, 4, i)]
-  public_subnets  = [for i in range(var.az_count) : cidrsubnet(var.vpc_cidr, 8, 200 + i)]
-
-  enable_nat_gateway   = true
-  single_nat_gateway   = var.single_nat_gateway
-  enable_dns_hostnames = true
-
-  # Subnet tags let Kubernetes place internet-facing / internal load balancers.
-  public_subnet_tags = {
-    "kubernetes.io/role/elb" = 1
-  }
-  private_subnet_tags = {
-    "kubernetes.io/role/internal-elb" = 1
+  associations = {
+    ebs_csi = {
+      cluster_name    = module.eks.cluster_name
+      namespace       = "kube-system"
+      service_account = "ebs-csi-controller-sa"
+    }
   }
 }
 
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "~> 20.31"
+  version = "~> 20.37"
 
   cluster_name    = local.cluster_name
   cluster_version = var.kubernetes_version
@@ -48,52 +26,59 @@ module "eks" {
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
 
-  cluster_endpoint_public_access       = true
+  cluster_endpoint_private_access      = true
+  cluster_endpoint_public_access       = var.cluster_endpoint_public_access
   cluster_endpoint_public_access_cidrs = var.cluster_endpoint_public_access_cidrs
 
-  # Grants the identity that runs `terraform apply` cluster-admin.
+  authentication_mode                      = "API"
   enable_cluster_creator_admin_permissions = true
 
-  cluster_addons = {
-    coredns    = {}
-    kube-proxy = {}
-    vpc-cni    = {}
-    # Backs the PVC that caches model weights. Permissions come from the node
-    # role (see iam_role_additional_policies below); use IRSA/Pod Identity in prod.
-    aws-ebs-csi-driver = {}
+  # Workloads use EKS Pod Identity, not IRSA.
+  enable_irsa = false
+
+  cloudwatch_log_group_retention_in_days = var.log_retention_days
+
+  # Karpenter discovers the security group to attach to GPU nodes by this tag.
+  node_security_group_tags = {
+    "karpenter.sh/discovery" = local.cluster_name
   }
 
+  cluster_addons = {
+    eks-pod-identity-agent = {
+      before_compute = true
+    }
+    vpc-cni = {
+      before_compute = true
+      # Enforces the NetworkPolicies shipped with the llm-serving chart.
+      configuration_values = jsonencode({
+        enableNetworkPolicy = "true"
+      })
+    }
+    kube-proxy = {}
+    coredns    = {}
+    aws-ebs-csi-driver = {
+      pod_identity_association = [{
+        role_arn        = module.ebs_csi_pod_identity.iam_role_arn
+        service_account = "ebs-csi-controller-sa"
+      }]
+    }
+  }
+
+  # CPU pool for Karpenter, gateway, router, monitoring. GPU nodes are
+  # provisioned by Karpenter (see charts/karpenter-resources).
   eks_managed_node_groups = {
-    # CPU pool for system pods (CoreDNS, EBS CSI controller, ...).
     system = {
       ami_type       = "AL2023_x86_64_STANDARD"
       instance_types = var.system_node_instance_types
-      min_size       = 1
-      max_size       = 3
-      desired_size   = var.system_node_count
-
-      iam_role_additional_policies = {
-        ebs_csi = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
-      }
-    }
-
-    # GPU pool. The AL2023 NVIDIA AMI ships the driver and container runtime;
-    # the device plugin DaemonSet (k8s/nvidia-device-plugin.yaml) exposes
-    # nvidia.com/gpu to the scheduler.
-    gpu = {
-      ami_type       = "AL2023_x86_64_NVIDIA"
-      instance_types = [var.gpu_instance_type]
-      capacity_type  = var.gpu_use_spot ? "SPOT" : "ON_DEMAND"
-
-      min_size     = var.gpu_node_min_count
-      max_size     = var.gpu_node_max_count
-      desired_size = var.gpu_node_desired_count
+      min_size       = var.system_node_min_size
+      max_size       = var.system_node_max_size
+      desired_size   = var.system_node_desired_size
 
       block_device_mappings = {
         xvda = {
           device_name = "/dev/xvda"
           ebs = {
-            volume_size           = var.gpu_disk_size_gb
+            volume_size           = var.system_node_disk_size_gb
             volume_type           = "gp3"
             encrypted             = true
             delete_on_termination = true
@@ -102,17 +87,25 @@ module "eks" {
       }
 
       labels = {
-        workload = "llm-inference"
-      }
-
-      # Keep non-GPU pods off expensive nodes.
-      taints = {
-        gpu = {
-          key    = "sku"
-          value  = "gpu"
-          effect = "NO_SCHEDULE"
-        }
+        role = "system"
       }
     }
+  }
+}
+
+module "karpenter" {
+  source  = "terraform-aws-modules/eks/aws//modules/karpenter"
+  version = "~> 20.37"
+
+  cluster_name = module.eks.cluster_name
+
+  enable_v1_permissions           = true
+  enable_pod_identity             = true
+  create_pod_identity_association = true
+
+  node_iam_role_use_name_prefix = false
+  node_iam_role_name            = "${local.cluster_name}-karpenter-node"
+  node_iam_role_additional_policies = {
+    AmazonSSMManagedInstanceCore = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
   }
 }

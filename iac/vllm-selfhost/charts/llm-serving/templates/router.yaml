@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-router
+  labels:
+    app: vllm-router
+    {{- include "llm.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.router.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: vllm-router
+  template:
+    metadata:
+      labels:
+        app: vllm-router
+        {{- include "llm.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: vllm-router
+      nodeSelector:
+        role: system
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: vllm-router
+      containers:
+        - name: router
+          image: {{ .Values.router.image }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+            - --service-discovery
+            - k8s
+            - --k8s-namespace
+            - {{ .Release.Namespace | quote }}
+            - --k8s-service-discovery-type
+            - pod-ip
+            - --k8s-label-selector
+            - app=vllm
+            - --routing-logic
+            - {{ .Values.router.routingLogic | quote }}
+            {{- if eq .Values.router.routingLogic "session" }}
+            - --session-key
+            - {{ .Values.router.sessionKey | quote }}
+            {{- end }}
+            - --engine-stats-interval
+            - "15"
+            - --request-stats-window
+            - "60"
+          env:
+            - name: PYTHONHASHSEED
+              value: "123"
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            {{- toYaml .Values.router.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+            failureThreshold: 5
+            initialDelaySeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-router
+  labels:
+    app: vllm-router
+    {{- include "llm.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: vllm-router
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: vllm-router
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: vllm-router

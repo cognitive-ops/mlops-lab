@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vllm
+  labels:
+    {{- include "llm.labels" . | nindent 4 }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vllm-router
+  labels:
+    {{- include "llm.labels" . | nindent 4 }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: litellm
+  labels:
+    {{- include "llm.labels" . | nindent 4 }}
+---
+# The router discovers vLLM pods through the Kubernetes API.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vllm-router-pod-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vllm-router-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: vllm-router
+roleRef:
+  kind: Role
+  name: vllm-router-pod-reader
+  apiGroup: rbac.authorization.k8s.io

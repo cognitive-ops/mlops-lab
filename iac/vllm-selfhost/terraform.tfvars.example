@@ -1,0 +1,30 @@
+# Copy to terraform.tfvars (git-ignored) and adjust.
+
+aws_region  = "us-east-1"
+environment = "prod"
+
+# --- Public endpoint -------------------------------------------------------
+# Leave empty to get an HTTP-only ALB on its AWS hostname (testing only).
+domain_name     = "llm.example.com"
+route53_zone_id = "Z0123456789ABCDEFGHIJ"
+
+# Narrow to your agents' egress ranges when known.
+allowed_ingress_cidrs = ["0.0.0.0/0"]
+# Restrict who can reach the Kubernetes API (your operator / CI egress IPs).
+cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]
+
+alarm_email = "oncall@example.com"
+
+# --- Model (decided: Qwen2.5-7B-Instruct, FP8) -------------------------------
+model_repo        = "Qwen/Qwen2.5-7B-Instruct"
+model_revision    = "main" # pin a commit hash
+model_served_name = "qwen2.5-7b-instruct"
+
+# Mirror the image first (scripts/mirror-image.sh) and pin the digest:
+# vllm_image = "<account>.dkr.ecr.us-east-1.amazonaws.com/vllm-eks-prod/vllm-openai@sha256:..."
+
+# --- Capacity (replace with benchmark results) -------------------------------
+gpu_baseline_count = 5
+gpu_max_count      = 16 # must be backed by AWS service quota
+# Pin a tested AMI release instead of "latest":
+# gpu_ami_alias = "al2023@v20250901"

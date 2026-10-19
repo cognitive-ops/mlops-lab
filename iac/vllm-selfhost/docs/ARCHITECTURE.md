@@ -188,7 +188,7 @@ For the 8B-class tier at roughly $1.9/hr per `g6e.xlarge` on-demand: baseline of
 - **Public endpoint (decided).** Route 53 record, ACM certificate, and ALB in public subnets with a TLS 1.2+ security policy. Because the endpoint is internet-facing:
   - Only the ALB is public. LiteLLM, the router, vLLM, and the EKS data plane stay private.
   - **No anonymous access.** Every request needs a LiteLLM virtual key. Disable the unauthenticated paths (`/health` details, `/metrics`, admin UI) at the ALB or via listener rules.
-  - **WAF** with AWS managed rule groups (Common, Known Bad Inputs, IP Reputation), a rate-based rule per source IP, and a request-body size limit. Add an IP allow list for known agent egress ranges if they are stable.
+  - **WAF** with the AWS IP-reputation and Known-Bad-Inputs managed rule groups plus a rate-based rule per source IP. The Common and SQL-injection rule groups are deliberately not used: prompts legitimately contain code, HTML, and SQL, and those rules would block them. Request-body size is limited at the gateway (`max_request_size_mb`). Add an IP allow list for known agent egress ranges if they are stable.
   - AWS Shield Standard is included. Evaluate Shield Advanced only if the endpoint becomes a DDoS target.
   - Gateway enforces `max_tokens`, request-size, and per-key RPM/TPM/budget caps. An unmetered public LLM endpoint is a direct cost-abuse risk (an attacker can burn GPU time).
   - Access logs on the ALB to S3, and alerts on spikes in 401/429 responses and spend per key.
@@ -204,7 +204,7 @@ For the 8B-class tier at roughly $1.9/hr per `g6e.xlarge` on-demand: baseline of
 ### 5.3 Routing tier: vLLM-aware router
 Round-robin is wasteful for agents because identical prefixes land on different replicas and each recomputes them.
 - Use the **vLLM production-stack router** (prefix/session-aware routing, queue-aware load balancing, Prometheus metrics), 2+ replicas on CPU nodes.
-- Agents send a stable session or agent ID header so conversations stick to a replica with a warm cache.
+- Default routing is **prefix-aware** (the router hashes prompt prefixes), which needs no client cooperation. Session routing is also available: agents send a stable session header and the gateway must forward it.
 - Alternatives to evaluate: Kubernetes **Gateway API Inference Extension** (endpoint picker) or **llm-d**. Treat router choice as swappable behind a Service. See ADR-3.
 
 ### 5.4 Inference tier: vLLM
@@ -277,17 +277,18 @@ Today's single EBS-backed PVC cannot be shared by replicas and is pinned to one 
 ## 7. Deployment and operations
 
 ### 7.1 Infrastructure as code
-Terraform, split into modules and state files that change at different rates:
+The concerns below change at different rates. The implementation keeps them as separate files in one Terraform root (see section 14); split them into separate states when more than one team applies changes.
 
-| Stack | Contents |
-|---|---|
-| `network` | VPC, subnets, NAT, VPC endpoints |
-| `cluster` | EKS, system node group, add-ons, Pod Identity, KMS |
-| `platform` | Karpenter, KEDA, LB Controller, GPU Operator/DCGM, External Secrets, Prometheus/Grafana |
-| `data` | S3 model bucket, ECR, Aurora, ElastiCache, Secrets Manager |
-| `workloads` (Helm/Kustomize via GitOps) | LiteLLM, router, vLLM pools, NetworkPolicies, ScaledObjects |
+| Concern | Implemented in | Contents |
+|---|---|---|
+| Network | `network.tf` | VPC, subnets, NAT, VPC endpoints |
+| Cluster | `eks.tf` | EKS, system node group, add-ons, Pod Identity, Karpenter IAM |
+| Data | `data.tf` | KMS, S3 model bucket, ECR, Aurora, ElastiCache, Secrets Manager |
+| Edge | `edge.tf` | ACM, Route 53, ALB, WAF, access logs, alarms |
+| Platform | `platform.tf` | Karpenter, KEDA, LB Controller, External Secrets, Prometheus/Grafana, device plugin, DCGM |
+| Workloads | `workloads.tf` + `charts/` | Karpenter pools, model sync, LiteLLM, router, vLLM, NetworkPolicies, ScaledObject |
 
-Remote state (S3 with locking), per-environment variables (`dev`, `staging`, `prod`), and `terraform plan` in CI.
+Remote state (S3 with locking) is a commented block in `provider.tf` and should be enabled before the first real apply. Per-environment variables (`dev`, `staging`, `prod`) and `terraform plan` in CI are still to do.
 
 ### 7.2 Delivery
 - **GitOps** (Argo CD or Flux) for workloads. Terraform for infrastructure.
@@ -385,3 +386,32 @@ Region-level DR is **out of scope** for the first production release (decision r
 5. **Latency SLOs:** confirm the targets in section 1 and whether some agents are batch-tolerant.
 6. **Tooling preferences:** Argo CD vs Flux, managed vs self-hosted Prometheus.
 7. **Managed-API fallback:** whether the overflow path to a different model is acceptable (section 5.2).
+
+---
+
+## 14. Implementation status
+
+The design above is implemented in this folder (see [README](../README.md)). It has been checked with `terraform validate`, `terraform fmt`, and `helm lint`/`helm template`. **It has not been applied to a real AWS account**, so treat the first apply in a non-production account as a test of the items marked "verify".
+
+### Implemented
+- Network, EKS (Pod Identity, network policy enforcement), Karpenter baseline and burst GPU pools, S3 model bucket with streamed loading, ECR, Aurora, Redis, Secrets Manager with External Secrets.
+- Public ALB with ACM, WAF, access logs, and alarms. Only `/v1/*` is routed.
+- LiteLLM gateway, prefix-aware router, vLLM with FP8, KEDA autoscaling on queue depth and KV-cache usage, Prometheus rules, and a Grafana dashboard.
+
+### Differences from the design
+- Workloads are installed by Terraform-driven Helm instead of GitOps (7.2).
+- NetworkPolicies are ingress-only. Default-deny egress is not applied, to avoid breaking DNS, S3, Aurora, and Redis access without a tested allow-list.
+- Alertmanager has no receivers configured, so Prometheus alerts are visible in the UI only. CloudWatch alarms do notify through SNS.
+- ECR pull-through cache and image pre-pulling are not set up. `scripts/mirror-image.sh` mirrors the image by hand.
+- The Aurora connection string does not set `sslmode`, so the database connection is not TLS-verified. Traffic stays inside private subnets and the database security group only admits cluster nodes.
+- Tracing (OpenTelemetry), log shipping (Fluent Bit), and a canary pool are not implemented.
+
+### Verify on first apply
+1. The `vllm/vllm-openai` image includes the Run:ai model streamer, and it can read S3 using Pod Identity credentials. Fallback: `model_source = "hf"`.
+2. The `v0.32.0-cu129` image works with the driver on the current EKS GPU AMI.
+3. vLLM metric names used by KEDA and the alerts (`vllm:num_requests_running`, `vllm:num_requests_waiting`, `vllm:kv_cache_usage_perc`) exist in your vLLM version.
+4. The router image `lmcache/lmstack-router:v0.1.13` discovers pods and routes with `prefixaware`.
+5. LiteLLM connects to Redis over TLS (`rediss://`) and runs its database migration against Aurora.
+6. The EKS version in `kubernetes_version` is available in your region, and the Karpenter, ALB-controller, KEDA, and Prometheus chart versions pinned in `platform.tf` are compatible with it.
+7. GPU quota covers `gpu_max_count`, and `g6e` capacity exists in at least two AZs.
+8. The throughput assumptions in section 4 against a real benchmark (Phase 0).

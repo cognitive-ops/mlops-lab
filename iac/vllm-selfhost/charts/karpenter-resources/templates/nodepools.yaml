@@ -1,0 +1,57 @@
+{{- /*
+  Two pools share one label (workload=llm-inference). The baseline pool has the
+  higher weight and a GPU ceiling equal to the always-on fleet, so Karpenter fills
+  it first and spills over to the burst pool (spot, falling back to on-demand).
+  vLLM pods carry karpenter.sh/do-not-disrupt, and nodes never expire, so serving
+  nodes only go away when KEDA scales the pods off them.
+*/ -}}
+{{- define "pool" -}}
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: {{ .name }}
+spec:
+  weight: {{ .weight }}
+  template:
+    metadata:
+      labels:
+        workload: llm-inference
+        pool: {{ .pool }}
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: gpu
+      expireAfter: Never
+      taints:
+        - key: sku
+          value: gpu
+          effect: NoSchedule
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
+        - key: karpenter.k8s.aws/instance-family
+          operator: In
+          values: [{{ .root.Values.instanceFamily | quote }}]
+        - key: karpenter.k8s.aws/instance-size
+          operator: In
+          values: {{ .root.Values.instanceSizes | toJson }}
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: {{ .capacity | toJson }}
+  limits:
+    nvidia.com/gpu: {{ .limit | quote }}
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: {{ .consolidateAfter }}
+{{- end -}}
+---
+{{ include "pool" (dict "root" . "name" "gpu-baseline" "pool" "baseline" "weight" 100 "capacity" (list "on-demand") "limit" .Values.baselineGpuLimit "consolidateAfter" "30m") }}
+{{- if gt (int .Values.burstGpuLimit) 0 }}
+---
+{{ include "pool" (dict "root" . "name" "gpu-burst" "pool" "burst" "weight" 10 "capacity" .Values.burstCapacity "limit" .Values.burstGpuLimit "consolidateAfter" "10m") }}
+{{- end }}

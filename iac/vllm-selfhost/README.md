@@ -1,74 +1,109 @@
-# vLLM self-hosted on Amazon EKS
+# vLLM on Amazon EKS (production)
 
-Terraform builds a VPC and an EKS cluster with a tainted GPU node group. Kubernetes manifests then run vLLM (OpenAI-compatible API) behind an NLB.
+Self-hosted, OpenAI-compatible LLM serving for ~1M requests/day and hundreds of concurrent agents.
+Design rationale, sizing, and decisions: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-Default model: `Qwen/Qwen2.5-7B-Instruct` on one `g5.xlarge` (A10G 24 GB).
+```
+Agents -> Route 53 -> ALB (TLS, WAF) -> LiteLLM (keys, limits) -> vLLM router (prefix-aware) -> vLLM pods (g6e / L40S)
+                                                                                                   ^ KEDA scales on queue depth
+                                                                                                   ^ Karpenter provisions GPU nodes
+Model weights: S3 -> Run:ai streamer      State: Aurora (keys/spend), Redis (rate limits)
+```
 
-> This stack is a **single-replica lab deployment**. The production design (about 1M requests/day, hundreds of concurrent agents) is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Model: `Qwen/Qwen2.5-7B-Instruct`, FP8 weights and KV cache, on single-GPU `g6e` instances (FP8 needs Ada/Hopper; the A10G in `g5` does not support it).
 
 ## Layout
 
-| Path | Purpose |
-|------|---------|
-| `provider.tf`, `variables.tf`, `outputs.tf` | Terraform config |
-| `eks.tf` | VPC, EKS cluster, `system` (CPU) and `gpu` node groups, EBS CSI addon |
-| `k8s/` | Namespace, NVIDIA device plugin, gp3 StorageClass + model-cache PVC, vLLM Deployment, NLB Service |
+| Path | What it builds |
+|---|---|
+| `network.tf` | 3-AZ VPC, NAT per AZ, S3 and ECR VPC endpoints |
+| `eks.tf` | EKS (Pod Identity, network policies, EBS CSI), system node group, Karpenter IAM and SQS |
+| `data.tf` | KMS key, S3 model bucket, ECR repo, Aurora Serverless v2, ElastiCache Redis, Secrets Manager |
+| `edge.tf` | ACM, Route 53, public ALB, WAF, access logs, CloudWatch alarms and SNS |
+| `platform.tf` | Pod Identity roles, Karpenter, LB controller, KEDA, External Secrets, Prometheus/Grafana, NVIDIA device plugin, DCGM |
+| `workloads.tf` | Installs the three charts below |
+| `charts/karpenter-resources` | GPU `EC2NodeClass` and `NodePool`s: `gpu-baseline` (on-demand) and `gpu-burst` (Spot with on-demand fallback) |
+| `charts/model-sync` | Hook job that mirrors Hugging Face weights into S3 |
+| `charts/llm-serving` | vLLM, router, LiteLLM, KEDA `ScaledObject`, NetworkPolicies, ServiceMonitors, alerts, Grafana dashboard |
+| `scripts/` | `mirror-image.sh`, `create-key.sh`, `smoke-test.sh` |
+
+## Prerequisites
+
+- Terraform >= 1.5, `aws` CLI (Terraform uses it for the EKS token), `kubectl`, `helm`, `docker` (image mirroring), `jq`.
+- AWS credentials with admin-level rights for the first apply.
+- **GPU quota** in the target region: Running On-Demand *G and VT* instances and All *G and VT* Spot Instance Requests. Request vCPUs for the maximum fleet (`g6e.xlarge` = 4 vCPUs, so 16 GPUs = 64+). Approval can take days. Without it, pods stay `Pending`.
+- For TLS: a Route 53 hosted zone for your domain.
 
 ## Deploy
 
 ```bash
 cd iac/vllm-selfhost
+cp terraform.tfvars.example terraform.tfvars   # edit: domain, CIDRs, capacity
+
+# 1. Create the registry first and mirror the vLLM image (avoids Docker Hub rate limits)
 terraform init
-terraform apply            # ~15 min
+terraform apply -target=aws_ecr_repository.vllm
+bash scripts/mirror-image.sh                    # prints the vllm_image value to put in terraform.tfvars
 
-# kubeconfig (also printed as the `configure_kubectl` output)
-aws eks update-kubeconfig --region us-east-1 --name vllm-eks-dev
-
-kubectl apply -k k8s/
-kubectl -n vllm rollout status deploy/vllm --timeout=30m
-kubectl -n vllm logs -f deploy/vllm
+# 2. Everything else (~25-40 min; includes the model download and first GPU node)
+terraform apply
+$(terraform output -raw configure_kubectl)
+kubectl -n llm get pods
 ```
 
-First start pulls the image (~10 GB) and downloads the weights into the EBS-backed cache; later restarts reuse it.
+`terraform apply` blocks until the model is mirrored into S3 (hook job) and the vLLM, router, and LiteLLM deployments are ready. If it times out on GPU capacity, see Troubleshooting, then re-run `terraform apply`.
 
-Optional secrets (create before or after the apply; the pod reads them as optional):
+Without `domain_name`, the ALB serves plain HTTP on its AWS hostname (`tls_enabled = false`). Use that for a first test only.
+
+## Issue keys and test
 
 ```bash
-kubectl -n vllm create secret generic hf-token --from-literal=HF_TOKEN=hf_xxx            # gated models
-kubectl -n vllm create secret generic vllm-api-key --from-literal=VLLM_API_KEY=$(openssl rand -hex 24)
-kubectl -n vllm rollout restart deploy/vllm
+bash scripts/create-key.sh support-agents 600 400000 500 30d    # alias, rpm, tpm, budget USD, period
+export LLM_API_KEY=sk-...                                        # the key returned above
+bash scripts/smoke-test.sh
 ```
 
-## Test
+Agents use any OpenAI-compatible client:
 
-```bash
-HOST=$(kubectl -n vllm get svc vllm -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-curl http://$HOST/v1/models
-curl http://$HOST/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $VLLM_API_KEY" \
-  -d '{"model":"qwen2.5-7b-instruct","messages":[{"role":"user","content":"Hello"}]}'
+```python
+from openai import OpenAI
+client = OpenAI(base_url="https://llm.example.com/v1", api_key=LLM_API_KEY)
+client.chat.completions.create(model="qwen2.5-7b-instruct", messages=[{"role": "user", "content": "Hello"}])
 ```
 
-Omit the `Authorization` header if you did not create `vllm-api-key`. The NLB can take a few minutes to become reachable.
+Give each agent or team its own key. Never hand out the master key (`terraform output get_master_key`).
+Only `/v1/*` is routed from the internet; the LiteLLM admin API and UI are reachable only via `kubectl port-forward`.
 
-## Customize
+## Operations
 
-- **Model / flags**: edit `command` and `args` in `k8s/deployment.yaml`. Match `--tool-call-parser` to the model family. Size the GPU for the weights plus KV cache, and use `--tensor-parallel-size N` with `nvidia.com/gpu: N` on multi-GPU instances.
-- **GPU type**: `-var gpu_instance_type=g4dn.xlarge` (T4, no bf16: also uncomment `--dtype half`). Check that the Qwen weights (~15 GB) fit your GPU.
-- **Spot**: `-var gpu_use_spot=true`.
-- **Image**: pinned to `v0.32.0-cu129`, which needs a recent NVIDIA driver. If the pod fails with CUDA/driver errors, switch to a lower-CUDA tag (e.g. a `cu12x` variant) in `k8s/deployment.yaml`.
-- **Lock down access**: set `loadBalancerSourceRanges` in `k8s/service.yaml` and `cluster_endpoint_public_access_cidrs`, or make the NLB internal via the commented annotation.
+| Task | How |
+|---|---|
+| Watch capacity | Grafana: `kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3000:80` (user `admin`, password in secret `monitoring/grafana-admin`), dashboard **vLLM Serving** |
+| Scaling state | `kubectl -n llm get scaledobject,hpa,pods -o wide` and `kubectl get nodeclaims,nodepools` |
+| Change baseline/max GPUs | Edit `gpu_baseline_count` / `gpu_max_count` and `terraform apply`. Check the quota first |
+| Change model | Edit `model_repo`, `model_revision`, `model_served_name` (and `vllm_tool_call_parser` if the family changes), then `terraform apply`. Roll out via a canary first |
+| Upgrade vLLM | Mirror the new image, change `vllm_image`, apply. Rollout surges one pod at a time and never drops capacity |
+| Upgrade GPU AMI | Pin `gpu_ami_alias` to a tested release, apply. Nodes do not expire on their own, so replace them deliberately (cordon, drain, delete) |
+| Rotate gateway secrets | Update the Secrets Manager secret, then `kubectl -n llm rollout restart deploy/litellm`. Do **not** rotate `LITELLM_SALT_KEY` |
+| Alerts | CloudWatch alarms go to the SNS topic (`alarm_email`). Prometheus alerts are defined in the chart; add Alertmanager receivers to page on them |
 
-## Notes
+## Troubleshooting
 
-- The EBS volume is zonal, so the vLLM pod stays in the zone where the PVC bound. Keep a GPU node available in that zone.
-- The EBS CSI driver gets its permissions from the node role for simplicity. For production, use IRSA or EKS Pod Identity.
-- Cost: GPU node, 2 system nodes, NAT gateway, NLB and EBS all bill while the cluster exists.
+- **vLLM pods `Pending`**: `kubectl get nodeclaims`; `kubectl describe nodeclaim <name>`. Usual causes: GPU vCPU quota, no `g6e` capacity in the AZ (add sizes in `gpu_instance_sizes`), or `gpu_max_count` reached.
+- **Pod starts but crashes loading weights**: `kubectl -n llm logs deploy/vllm`. Check the S3 path (`terraform output model_s3_uri`), the Pod Identity association for SA `llm/vllm`, and that the Run:ai streamer is in your image. As a fallback set `model_source = "hf"` to download from Hugging Face.
+- **CUDA / driver errors**: the `cu129` image needs a recent NVIDIA driver; use a lower-CUDA tag or a newer GPU AMI.
+- **Router shows no backends**: `kubectl -n llm logs deploy/vllm-router`; the pod needs label `app=vllm` and a passing `/health`.
+- **429 from the gateway**: per-key rpm/tpm/budget limit; adjust the key. **403 from the ALB**: WAF rate limit (`waf_rate_limit_per_5min`) or `allowed_ingress_cidrs`.
+- **Prometheus metrics missing for KEDA**: check `kubectl -n llm get servicemonitor` and that the query in `charts/llm-serving/templates/keda.yaml` returns data in Prometheus.
 
 ## Destroy
 
 ```bash
-kubectl delete -k k8s/        # removes the NLB and EBS volume first
 terraform destroy
 ```
+
+`deletion_protection = true` (default) protects the ALB, Aurora, and S3 buckets. Set it to `false` and apply before destroying a throwaway environment.
+
+## Known limitations (see ARCHITECTURE.md, section 14)
+
+Workloads are installed by Terraform-driven Helm rather than GitOps, NetworkPolicies cover ingress only, and DR is out of scope. Throughput and fleet-size figures are planning assumptions until you run the Phase 0 benchmark.

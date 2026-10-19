@@ -1,0 +1,15 @@
+clusterName: ""
+nodeRoleName: ""
+
+# Pin a release (e.g. al2023@v20250901) in production and roll it deliberately.
+amiAlias: al2023@latest
+diskSizeGb: 200
+
+# Single-GPU sizes of this family (FP8 needs Ada/Hopper, e.g. g6e = L40S).
+instanceFamily: g6e
+instanceSizes: [xlarge, 2xlarge, 4xlarge]
+
+# GPU count ceilings per pool. Baseline fills first (higher weight), burst takes the rest.
+baselineGpuLimit: 5
+burstGpuLimit: 11
+burstCapacity: [spot, on-demand]

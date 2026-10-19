@@ -1,0 +1,160 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  labels:
+    app: litellm
+    {{- include "llm.labels" . | nindent 4 }}
+spec:
+  # Replicas are owned by the HPA.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: litellm
+  template:
+    metadata:
+      labels:
+        app: litellm
+        {{- include "llm.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/litellm-config.yaml") . | sha256sum | trunc 16 }}
+    spec:
+      serviceAccountName: litellm
+      terminationGracePeriodSeconds: 120
+      nodeSelector:
+        role: system
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: litellm
+      containers:
+        - name: litellm
+          image: {{ .Values.litellm.image }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config
+            - /etc/litellm/config.yaml
+            - --port
+            - "4000"
+            - --num_workers
+            - {{ .Values.litellm.workers | quote }}
+          ports:
+            - name: http
+              containerPort: 4000
+          env:
+            - name: LITELLM_MODE
+              value: PRODUCTION
+            - name: DISABLE_ADMIN_UI
+              value: "True"
+            - name: NO_DOCS
+              value: "True"
+            - name: NO_REDOC
+              value: "True"
+            - name: JSON_LOGS
+              value: "True"
+          envFrom:
+            - secretRef:
+                name: litellm-secrets
+          resources:
+            {{- toYaml .Values.litellm.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/litellm
+              readOnly: true
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "20"]
+          startupProbe:
+            httpGet:
+              path: /health/liveliness
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health/liveliness
+              port: http
+            periodSeconds: 20
+            failureThreshold: 5
+            timeoutSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: litellm-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  labels:
+    app: litellm
+    {{- include "llm.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: litellm
+  ports:
+    - name: http
+      port: 4000
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: litellm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: litellm
+  minReplicas: {{ .Values.litellm.minReplicas }}
+  maxReplicas: {{ .Values.litellm.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: litellm
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: litellm
+{{- if .Values.edge.targetGroupArn }}
+---
+# Registers LiteLLM pod IPs into the Terraform-managed ALB target group.
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: litellm
+spec:
+  serviceRef:
+    name: litellm
+    port: 4000
+  targetGroupARN: {{ .Values.edge.targetGroupArn }}
+  targetType: ip
+{{- end }}

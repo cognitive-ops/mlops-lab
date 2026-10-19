@@ -1,0 +1,50 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: vllm
+  labels:
+    {{- include "llm.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: vllm
+  minReplicaCount: {{ .Values.vllm.minReplicas }}
+  maxReplicaCount: {{ .Values.vllm.maxReplicas }}
+  pollingInterval: 15
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        # Scale up fast: GPU nodes take minutes to arrive.
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Percent
+              value: 100
+              periodSeconds: 60
+            - type: Pods
+              value: 4
+              periodSeconds: 60
+          selectPolicy: Max
+        # Scale down slowly: warm prefix caches and node start-up are expensive to lose.
+        scaleDown:
+          stabilizationWindowSeconds: 900
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 300
+  triggers:
+    # Total demand (running + queued) divided by the per-replica concurrency target.
+    - type: prometheus
+      metricType: AverageValue
+      metadata:
+        serverAddress: {{ .Values.vllm.prometheusServerAddr }}
+        query: sum(vllm:num_requests_running{namespace="{{ .Release.Namespace }}"}) + sum(vllm:num_requests_waiting{namespace="{{ .Release.Namespace }}"})
+        threshold: {{ .Values.vllm.targetConcurrency | quote }}
+        ignoreNullValues: "true"
+    # Guard: scale out before the KV cache saturates and requests get preempted.
+    - type: prometheus
+      metricType: Value
+      metadata:
+        serverAddress: {{ .Values.vllm.prometheusServerAddr }}
+        query: avg(vllm:kv_cache_usage_perc{namespace="{{ .Release.Namespace }}"})
+        threshold: {{ .Values.vllm.targetKvCacheUsage | quote }}
+        ignoreNullValues: "true"
