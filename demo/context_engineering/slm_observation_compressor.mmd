@@ -1,0 +1,37 @@
+flowchart TD
+    A["Main Agent calls tool<br/>(MIB / Rx core system)"] --> B["Raw JSON observation<br/>~10,000 lines / ~76k tokens"]
+
+    subgraph MW["Compression middleware (SLMCompressor.compress)"]
+        direction TB
+        S0["Stage 0 - deterministic, no LLM<br/>to_lines(): drop NOISE_KEY fields (audit_log, etag, _links, trace, raw_*),<br/>drop nulls, truncate long strings, 1 record = 1 line<br/>~76k to ~10k tokens"]
+        CH["chunk_lines()<br/>split by token budget (default 5k)"]
+        subgraph MAP["Stage 1 - MAP (parallel, ThreadPoolExecutor)"]
+            direction LR
+            M1["chunk 1 to gpt-4o-mini<br/>MAP_SYS + TASK"]
+            M2["chunk 2 to gpt-4o-mini"]
+            M3["chunk N to gpt-4o-mini"]
+        end
+        F{"all chunks NONE?"}
+        R["Stage 2 - REDUCE (gpt-4o-mini)<br/>merge + dedupe, group headings,<br/>keep ids / dates / codes, max 200 words"]
+        L{"words > 1.2 x limit?"}
+        RT["retry once: 'cut harder'"]
+        L2{"words > 1.5 x limit?"}
+        TR["hard-trim by bullet"]
+        NF["'(no task-relevant facts found)'"]
+        S0 --> CH --> MAP --> F
+        F -- no --> R --> L
+        F -- yes --> NF
+        L -- yes --> RT --> L2
+        L -- no --> L2
+        L2 -- yes --> TR
+    end
+
+    B --> S0
+    L2 -- no --> MD
+    TR --> MD
+    NF --> MD
+    MD["Markdown list ~200 words / ~180 tokens"] --> WM["Main Agent Working Memory<br/>(scratchpad)"]
+    WM --> AG["Main Agent LLM (gpt-4o)<br/>answers from WORKING MEMORY only"]
+    AG --> OUT["Answer + evidence ids"]
+
+    MD -.-> CHK["Metrics: raw to stage0 to out tokens,<br/>needle recall 7/7, latency"]
