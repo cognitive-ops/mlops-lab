@@ -1,13 +1,14 @@
 """
 Agentic semantic chunking.
 
-Step 1 (deterministic): embed sentences, cut where adjacent-sentence cosine
-distance spikes (percentile threshold) -> initial semantic chunks.
+Step 1 (library): LlamaIndex SemanticSplitterNodeParser embeds sentences and cuts
+where adjacent-sentence cosine distance spikes (percentile threshold) -> initial chunks.
 Step 2 (agentic): an LLM agent inspects the chunks via tools and fixes
 over/under-segmentation (merge, split, re-chunk with another threshold),
 then calls `finish`.
 
 Usage:
+    pip install -r requirements.txt   # llama-index-core, llama-index-embeddings-openai
     export OPENAI_API_KEY=...
     python semantic_chunking_agent.py                  # agent refines chunks
     python semantic_chunking_agent.py --no-agent       # embeddings-only baseline
@@ -21,6 +22,9 @@ import re
 from typing import Any, Dict, List
 
 import numpy as np
+from llama_index.core import Document
+from llama_index.core.node_parser import SemanticSplitterNodeParser
+from llama_index.embeddings.openai import OpenAIEmbedding
 from openai import OpenAI
 
 EMBED_MODEL = "text-embedding-3-small"
@@ -46,30 +50,46 @@ def split_sentences(text: str) -> List[str]:
 
 
 class Chunker:
-    """Holds sentences + embeddings and the current chunking (list of sentence-index lists)."""
+    """Holds the current chunking (list of sentence-index lists) + sentence embeddings.
 
-    def __init__(self, text: str, client: OpenAI):
+    Chunk boundaries come from LlamaIndex's SemanticSplitterNodeParser. Sentence-level
+    embeddings are kept only so the agent can see coherence / gap scores per chunk.
+    """
+
+    def __init__(self, text: str, client: OpenAI, buffer_size: int = 1, percentile: float = 95):
         self.client = client
-        self.sentences = split_sentences(text)
-        resp = client.embeddings.create(model=EMBED_MODEL, input=self.sentences)
-        vecs = np.array([d.embedding for d in resp.data], dtype=np.float32)
-        self.vecs = vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
-        # distance between sentence i and i+1
-        self.dist = 1.0 - np.sum(self.vecs[:-1] * self.vecs[1:], axis=1)
+        self.embed_model = OpenAIEmbedding(model=EMBED_MODEL)
+        self.buffer_size = buffer_size
+        self.text_in = text
+        self._emb_cache: Dict[str, np.ndarray] = {}
+        self.sentences: List[str] = []
         self.chunks: List[List[int]] = []
-        self.semantic_chunk(95)
+        self.semantic_chunk(percentile)
+
+    def _embed(self, sentences: List[str]) -> np.ndarray:
+        missing = [t for t in dict.fromkeys(sentences) if t not in self._emb_cache]
+        if missing:
+            for t, v in zip(missing, self.embed_model.get_text_embedding_batch(missing)):
+                v = np.array(v, dtype=np.float32)
+                self._emb_cache[t] = v / np.linalg.norm(v)
+        return np.stack([self._emb_cache[t] for t in sentences])
 
     def semantic_chunk(self, percentile: float) -> str:
-        """Cut at adjacent-sentence distances above the given percentile."""
-        threshold = np.percentile(self.dist, percentile)
-        cuts = [i for i, d in enumerate(self.dist) if d > threshold]
-        chunks, start = [], 0
-        for c in cuts:
-            chunks.append(list(range(start, c + 1)))
-            start = c + 1
-        chunks.append(list(range(start, len(self.sentences))))
-        self.chunks = chunks
-        return f"{len(chunks)} chunks (percentile={percentile}, threshold={threshold:.3f})"
+        """(Re)chunk with LlamaIndex; lower percentile = more chunks."""
+        parser = SemanticSplitterNodeParser(
+            buffer_size=self.buffer_size,
+            breakpoint_percentile_threshold=int(percentile),
+            embed_model=self.embed_model,
+        )
+        nodes = parser.get_nodes_from_documents([Document(text=self.text_in)])
+        self.sentences, self.chunks = [], []
+        for node in nodes:
+            sents = split_sentences(node.get_content())
+            self.chunks.append(list(range(len(self.sentences), len(self.sentences) + len(sents))))
+            self.sentences += sents
+        self.vecs = self._embed(self.sentences)
+        self.dist = 1.0 - np.sum(self.vecs[:-1] * self.vecs[1:], axis=1)  # gap between sentence i and i+1
+        return f"{len(self.chunks)} chunks (percentile={percentile}, LlamaIndex SemanticSplitter)"
 
     def text(self, idx: int) -> str:
         return " ".join(self.sentences[i] for i in self.chunks[idx])

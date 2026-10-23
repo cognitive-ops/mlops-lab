@@ -1,17 +1,16 @@
 flowchart TD
-    IN["Input text<br/>--file or SAMPLE_TEXT"] --> SS["split_sentences()<br/>regex on . ! ? and blank lines"]
+    IN["Input text<br/>--file or SAMPLE_TEXT"]
 
-    subgraph INIT["Step 1 - deterministic (Chunker.__init__)"]
+    subgraph INIT["Step 1 - LlamaIndex (Chunker.semantic_chunk)"]
         direction TB
-        EMB["OpenAI embeddings<br/>text-embedding-3-small, 1 call for all sentences"]
-        NORM["L2-normalize vectors"]
-        DIST["dist[i] = 1 - cos(sent i, sent i+1)"]
-        SC["semantic_chunk(percentile = 95)<br/>threshold = percentile of dist<br/>cut after every i where dist[i] > threshold"]
-        EMB --> NORM --> DIST --> SC
+        SPL["SemanticSplitterNodeParser<br/>buffer_size=1, breakpoint_percentile_threshold=95<br/>(embeds sentences, cuts at distance spikes)"]
+        RES["split nodes back into sentences<br/>global sentence ids + chunk index lists"]
+        EMB["OpenAIEmbedding per sentence (cached)<br/>dist[i] = 1 - cos(sent i, sent i+1), for agent metrics"]
+        SPL --> RES --> EMB
     end
 
-    SS --> EMB
-    SC --> CH[("self.chunks<br/>list of sentence-index lists")]
+    IN --> SPL
+    EMB --> CH[("self.chunks<br/>list of sentence-index lists")]
     CH --> LC0["print initial chunks<br/>list_chunks(): size, coherence, gap_to_next, preview"]
     LC0 --> NA{"--no-agent?"}
     NA -- yes --> FIN
