@@ -1,0 +1,50 @@
+flowchart TD
+    IN["Input text<br/>--file or SAMPLE_TEXT"] --> SS["split_sentences()<br/>regex on . ! ? and blank lines"]
+
+    subgraph INIT["Step 1 - deterministic (Chunker.__init__)"]
+        direction TB
+        EMB["OpenAI embeddings<br/>text-embedding-3-small, 1 call for all sentences"]
+        NORM["L2-normalize vectors"]
+        DIST["dist[i] = 1 - cos(sent i, sent i+1)"]
+        SC["semantic_chunk(percentile = 95)<br/>threshold = percentile of dist<br/>cut after every i where dist[i] > threshold"]
+        EMB --> NORM --> DIST --> SC
+    end
+
+    SS --> EMB
+    SC --> CH[("self.chunks<br/>list of sentence-index lists")]
+    CH --> LC0["print initial chunks<br/>list_chunks(): size, coherence, gap_to_next, preview"]
+    LC0 --> NA{"--no-agent?"}
+    NA -- yes --> FIN
+    NA -- no --> SEED
+
+    subgraph AGENT["Step 2 - agentic refinement (run_agent, max 12 steps)"]
+        direction TB
+        SEED["messages = SYSTEM prompt + initial list_chunks()"]
+        LLM["gpt-4o chat.completions<br/>with TOOLS (function calling)"]
+        TC{"tool_calls?"}
+        DISP["dispatch tool call<br/>errors are returned to the agent as text"]
+        subgraph TOOLSET["Tools acting on Chunker"]
+            direction LR
+            T1["list_chunks"]
+            T2["get_chunk(index)"]
+            T3["merge_chunks(index)<br/>merge with next"]
+            T4["split_chunk(index, after_sentence)"]
+            T5["rechunk(percentile)<br/>discards edits, re-cuts"]
+        end
+        FN{"finish called?"}
+        LIM{"step limit reached?"}
+        SEED --> LLM --> TC
+        TC -- no --> OUT
+        TC -- yes --> DISP --> TOOLSET
+        TOOLSET -- "tool result appended to messages" --> FN
+        FN -- no --> LIM
+        LIM -- no --> LLM
+        LIM -- yes --> OUT
+        FN -- yes --> OUT
+    end
+
+    T3 -. mutates .-> CH
+    T4 -. mutates .-> CH
+    T5 -. rebuilds .-> CH
+    OUT["agent done"] --> FIN
+    FIN["print final chunks<br/>text + coherence (mean pairwise cosine)"]
