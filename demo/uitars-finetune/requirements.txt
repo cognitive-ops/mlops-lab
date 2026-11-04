@@ -1,0 +1,7 @@
+llamafactory>=0.9.1
+transformers>=4.49
+torch
+pillow
+peft
+bitsandbytes
+qwen-vl-utils
