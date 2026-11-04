@@ -1,0 +1,8 @@
+{"image": "shots/task1_step1.png", "task": "Open the Settings page", "thought": "The sidebar has a Settings entry near the bottom. I should click it.", "action": "click", "x": 0.08, "y": 0.86}
+{"image": "shots/task1_step2.png", "task": "Open the Settings page", "thought": "The Settings page is now displayed, so the task is complete.", "action": "finished"}
+{"image": "shots/task2_step1.png", "task": "Search for 'invoice 2024'", "thought": "The search box is at the top center. I need to click it before typing.", "action": "click", "x": 0.50, "y": 0.07}
+{"image": "shots/task2_step2.png", "task": "Search for 'invoice 2024'", "thought": "The search box is focused. I should type the query.", "action": "type", "text": "invoice 2024\n"}
+{"image": "shots/task2_step3.png", "task": "Search for 'invoice 2024'", "thought": "Results for the query are shown. The task is complete.", "action": "finished"}
+{"image": "shots/task3_step1.png", "task": "Find the Export button in the report list", "thought": "The Export button is not visible. I should scroll down the report list.", "action": "scroll", "x": 0.55, "y": 0.60, "direction": "down"}
+{"image": "shots/task3_step2.png", "task": "Find the Export button in the report list", "thought": "The Export button is now visible at the bottom right. I should click it.", "action": "click", "x": 0.91, "y": 0.93}
+{"image": "shots/task3_step3.png", "task": "Find the Export button in the report list", "thought": "The export dialog appeared, so the task is complete.", "action": "finished"}
