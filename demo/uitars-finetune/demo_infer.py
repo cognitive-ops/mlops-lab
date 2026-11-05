@@ -133,10 +133,19 @@ def main():
     act = predict(model, processor, img, a.task, a.coord)
     print("MODEL OUTPUT:\n", act["reply"])
     print("\nPARSED:", {k: v for k, v in act.items() if k != "reply"})
-    if act["screen_point"]:
-        draw_point(img, act["screen_point"]).save(a.out)
-        print(f"click at ({act['screen_point'][0]:.0f},{act['screen_point'][1]:.0f}) "
-              f"of {img.size[0]}x{img.size[1]} -> saved {a.out}")
+    if not act["screen_point"]:
+        img.save(a.out)
+        print(f"WARNING: no click point in model output; saved plain screenshot -> {a.out}")
+        return
+    px, py = act["screen_point"]
+    W, H = img.size
+    print(f"click at ({px:.0f},{py:.0f}) of {W}x{H}")
+    if not (0 <= px < W and 0 <= py < H):
+        print(f"WARNING: point is outside the image; wrong --coord convention? "
+              f"(tried '{a.coord}'). Marker clamped to the edge.")
+        px, py = min(max(px, 0), W - 1), min(max(py, 0), H - 1)
+    draw_point(img, (px, py)).save(a.out)
+    print(f"saved {a.out}")
 
 
 if __name__ == "__main__":
