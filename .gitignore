@@ -18,3 +18,5 @@ venv/
 .DS_Store
 **/.env
 **/*.sqlite
+# wandb run logs (contain account email/metadata)
+**/wandb/

@@ -6,8 +6,9 @@ from haystack.dataclasses import ChatMessage
 from haystack.tools import ComponentTool
 from haystack.components.websearch import SerperDevWebSearch
 
-os.environ["OPENAI_API_KEY"] = "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"
-os.environ["SERPERDEV_API_KEY"] = "e3d46ef2f76715fea7b94eb590c26dd6cc1faa5e"
+for _name in ("OPENAI_API_KEY", "SERPERDEV_API_KEY"):
+    if not os.environ.get(_name):
+        raise SystemExit(f"Set {_name} in your environment before running this demo.")
 
 search_tool = ComponentTool(component=SerperDevWebSearch())
 
